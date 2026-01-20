@@ -12,7 +12,6 @@ opencv-python~=4.11.0.86
 bbcode~=1.1.0
 openpyxl~=3.1.5
 fuzzywuzzy==0.18.0
-ujson==5.1.0
 scikit-image~=0.22.0
 pydantic>=2.0.0
 kaleido==0.2.1
