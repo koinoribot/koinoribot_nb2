@@ -12,6 +12,7 @@ from typing import Dict, Optional
 from nonebot import logger
 from nonebot.matcher import Matcher
 from nonebot.params import Depends
+from ...money import UserWallet
 
 from ... import money
 from ...tools import get_uid
@@ -219,7 +220,7 @@ class FishingManager:
 
     @classmethod
     async def multi_fishing(cls, uid:int, matcher: Matcher,times: int, cost: int, star_cost: int, command_name: str, 
-                           cooldown_manager, event_adapter):
+                           cooldown_manager, user_wallet: UserWallet):
         """
         多连钓鱼核心逻辑
 
@@ -231,14 +232,12 @@ class FishingManager:
             star_cost: 星星消耗
             command_name: 命令名称（用于显示）
             cooldown_manager: 冷却管理器实例
-            event_adapter: 事件适配器模块
+            user_wallet: 钱包实例
         """
-        user_gold = money.get_user_money(uid, 'gold') or 0
-        user_starstone = money.get_user_money(uid, 'starstone') or 0
 
         # 检查星星
-        if config.star_price != 0 and user_starstone < star_cost:
-            await matcher.finish('星星不够用了呢...', at_sender=True)
+        if config.star_price != 0 and user_wallet.starstone < star_cost:
+            await matcher.finish("星星不够用了呢...", at_sender=True)
 
         user_info = await cls.get_user_info(uid)
         actual_cost = cost * config.bait_price
@@ -250,11 +249,11 @@ class FishingManager:
         auto_buy = False
         # 检查鱼饵
         if user_info['fish'].get('🍙', 0) < cost:
-            if user_gold >= actual_cost:
-                money.reduce_user_money(uid, 'gold', actual_cost)
+            if user_wallet.gold >= actual_cost:
+                user_wallet.gold -= actual_cost
                 auto_buy = True
             else:
-                await matcher.finish('金币或鱼饵不足喔...', at_sender=True)
+                await matcher.finish("金币或鱼饵不足喔...", at_sender=True)
 
         # 检查次数限制
         limit = DatabaseManager.check_and_update_fish_limit(uid, times)
@@ -264,18 +263,18 @@ class FishingManager:
         if uid not in config.SUPERUSERS and not limit:
             await matcher.send(f'\n今日钓鱼次数已达上限喔...你还能钓鱼{rest_count}次。\n明天再来吧~', at_sender=True)
             if auto_buy:
-                money.increase_user_money(uid, 'gold', actual_cost)
+                user_wallet.gold += actual_cost
             return
 
         cooldown_manager.start_cd(uid)
 
         # 扣星星
         if config.star_price != 0:
-            money.reduce_user_money(uid, 'starstone', star_cost)
+            user_wallet.starstone -= star_cost
 
         # 消耗鱼饵
         if not auto_buy:
-            await cls.decrease_value(uid, 'fish', '🍙', cost, user_info)
+            await cls.decrease_value(uid, "fish", "🍙", cost, user_info)
 
         # 执行多次钓鱼
         result_summary: Dict[str, int] = {}
@@ -283,8 +282,8 @@ class FishingManager:
 
         for _ in range(times):
             resp = await cls.do_fishing(uid, skip_random_events=True, user_info=user_info)
-            if resp['code'] == 1:
-                msg = resp['msg']
+            if resp["code"] == 1:
+                msg = resp["msg"]
                 for fish in FISH_LIST:
                     if fish in msg:
                         result_summary[fish] = result_summary.get(fish, 0) + 1
@@ -312,20 +311,20 @@ class FishingManager:
 
         # 活动补贴
         if not have_star and config.extra_gold == 1 and times == 100:
-            money.increase_user_money(uid, 'gold', 300)
+            user_wallet.gold += 300
             summary_message += " +300(补贴)"
 
         # 幸运币奖励
         if actual_cost > 0:
             ratio = value / actual_cost
             if ratio > 3:
-                money.increase_user_money(uid, 'luckygold', 3)
+                user_wallet.gold += 3
                 summary_message += "\n幸运币+3"
             elif ratio > 2.5:
-                money.increase_user_money(uid, 'luckygold', 2)
+                user_wallet.gold += 2
                 summary_message += "\n幸运币+2"
             elif ratio > 2:
-                money.increase_user_money(uid, 'luckygold', 1)
+                user_wallet.gold += 1
                 summary_message += "\n幸运币+1"
 
         # 添加今日次数提示

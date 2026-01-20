@@ -6,29 +6,28 @@
 弃用功能：捉萝莉、系统红包
 """
 
-import random
 import datetime
+import random
 import time
 
-from nonebot import on_fullmatch, on_command, get_driver
-from nonebot.plugin import PluginMetadata
-from nonebot.adapters import Event, Bot, Message
-from nonebot import logger
-from nonebot.params import Depends, CommandArg
-from nonebot.matcher import Matcher
+from nonebot import get_driver, logger, on_command, on_fullmatch
+from nonebot.adapters import Bot, Event, Message
 from nonebot.log import logger
+from nonebot.matcher import Matcher
+from nonebot.params import CommandArg, Depends
+from nonebot.plugin import PluginMetadata
 
 from ... import event_adapter
-from ... import money
 from ...koinori_config import config
+from ...money import UserWallet, wallet_manager
+from ...tools import get_group_id, get_uid
 from ...utils import FreqLimiter
-from ...tools import get_uid, get_group_id
+from .getbottle import BottleManager
+from .getfish import FISH_LIST, FISH_PRICE, PROBABILITY, PROBABILITY_2, FishingManager
+from .serif import COOL_TIME_SERIF, GET_FISH_SERIF, NO_FISH_SERIF
 
 # 导入重构后的模块
-from .util import DatabaseManager, CooldownManager
-from .getfish import FishingManager, FISH_LIST, FISH_PRICE, PROBABILITY, PROBABILITY_2
-from .getbottle import BottleManager
-from .serif import NO_FISH_SERIF, GET_FISH_SERIF, COOL_TIME_SERIF
+from .util import CooldownManager, DatabaseManager
 
 __plugin_meta__ = PluginMetadata(
     name="fishing",
@@ -139,7 +138,9 @@ single_fish_cmd = on_fullmatch("钓鱼", priority=5, block=True)
 
 
 @single_fish_cmd.handle()
-async def handle_single_fish(uid: int = Depends(get_uid)) -> None:
+async def handle_single_fish(
+    uid: int = Depends(get_uid), user_wallet: UserWallet = Depends(wallet_manager)
+) -> None:
     # 冷却检测
     if not freq.check(uid):
         await single_fish_cmd.finish(
@@ -147,14 +148,13 @@ async def handle_single_fish(uid: int = Depends(get_uid)) -> None:
         )
 
     user_info = await FishingManager.get_user_info(uid)
-    user_gold = money.get_user_money(uid, "gold") or 0
     bait_cost = config.bait_price * config.bait_num
 
     auto_buy = False
     # 检查鱼饵
     if user_info["fish"].get("🍙", 0) < config.bait_num:
-        if user_gold >= bait_cost:
-            money.reduce_user_money(uid, "gold", bait_cost)
+        if user_wallet.gold >= bait_cost:
+            user_wallet.gold -= bait_cost
             auto_buy = True
         else:
             await single_fish_cmd.finish(
@@ -188,7 +188,11 @@ ten_fish_cmd = on_fullmatch(
 
 
 @ten_fish_cmd.handle()
-async def handle_ten_fish(matcher: Matcher, uid: int = Depends(get_uid)) -> None:
+async def handle_ten_fish(
+    matcher: Matcher,
+    uid: int = Depends(get_uid),
+    wallet: UserWallet = Depends(wallet_manager),
+) -> None:
     await FishingManager.multi_fishing(
         uid,
         matcher,
@@ -197,7 +201,7 @@ async def handle_ten_fish(matcher: Matcher, uid: int = Depends(get_uid)) -> None
         config.star_price * 10 // 2,
         "十连钓鱼",
         general_cooldown,
-        event_adapter,
+        wallet,
     )
 
 
@@ -208,7 +212,11 @@ hundred_fish_cmd = on_fullmatch(
 
 
 @hundred_fish_cmd.handle()
-async def handle_hundred_fish(matcher: Matcher, uid: int = Depends(get_uid)) -> None:
+async def handle_hundred_fish(
+    matcher: Matcher,
+    uid: int = Depends(get_uid),
+    wallet: UserWallet = Depends(wallet_manager),
+) -> None:
     await FishingManager.multi_fishing(
         uid,
         matcher,
@@ -217,7 +225,7 @@ async def handle_hundred_fish(matcher: Matcher, uid: int = Depends(get_uid)) -> 
         config.star_price * 100 // 2,
         "百连钓鱼",
         general_cooldown,
-        event_adapter,
+        wallet,
     )
 
 
@@ -228,7 +236,11 @@ thousand_fish_cmd = on_fullmatch(
 
 
 @thousand_fish_cmd.handle()
-async def handle_thousand_fish(matcher: Matcher, uid: int = Depends(get_uid)) -> None:
+async def handle_thousand_fish(
+    matcher: Matcher,
+    uid: int = Depends(get_uid),
+    wallet: UserWallet = Depends(wallet_manager),
+) -> None:
     await FishingManager.multi_fishing(
         uid,
         matcher,
@@ -237,7 +249,7 @@ async def handle_thousand_fish(matcher: Matcher, uid: int = Depends(get_uid)) ->
         config.star_price * 1000 // 2,
         "千连钓鱼",
         general_cooldown,
-        event_adapter,
+        wallet,
     )
 
 
@@ -247,7 +259,9 @@ buy_bait_cmd = on_command("买鱼饵", priority=5, block=True)
 
 @buy_bait_cmd.handle()
 async def handle_buy_bait(
-    args: Message = CommandArg(), uid: int = Depends(get_uid)
+    args: Message = CommandArg(),
+    uid: int = Depends(get_uid),
+    user_wallet: UserWallet = Depends(wallet_manager),
 ) -> None:
     message = args.extract_plain_text()
     num = int(message) if message.isdigit() else 1
@@ -258,13 +272,12 @@ async def handle_buy_bait(
     if num <= 0:
         await buy_bait_cmd.finish("数量必须大于0", at_sender=True)
 
-    user_gold = money.get_user_money(uid, "gold") or 0
     cost = num * config.bait_price
 
-    if user_gold < cost:
+    if user_wallet.gold < cost:
         await buy_bait_cmd.finish("金币不足喔...", at_sender=True)
 
-    money.reduce_user_money(uid, "gold", cost)
+    user_wallet.gold -= cost
     await FishingManager.increase_value(uid, "fish", "🍙", num)
 
     await buy_bait_cmd.finish(f"成功购买{num}个鱼饵~(金币-{cost})", at_sender=True)
@@ -296,7 +309,9 @@ sell_cmd = on_command("出售", priority=5, block=True)
 
 @sell_cmd.handle()
 async def handle_sell(
-    uid: int = Depends(get_uid), args: Message = CommandArg()
+    uid: int = Depends(get_uid),
+    args: Message = CommandArg(),
+    user_wallet: UserWallet = Depends(wallet_manager),
 ) -> None:
     message = args.extract_plain_text()
     parts = message.split()
@@ -320,7 +335,7 @@ async def handle_sell(
 
     await FishingManager.decrease_value(uid, "fish", fish, num, user_info)
     get_golds = FISH_PRICE.get(fish, 0) * num
-    money.increase_user_money(uid, "gold", get_golds)
+    user_wallet.gold += get_golds
     await FishingManager.increase_value(uid, "statis", "sell", get_golds, user_info)
     await FishingManager.save_user_info(uid, user_info)
 
@@ -336,7 +351,9 @@ sell_small_cmd = on_fullmatch(
 
 
 @sell_small_cmd.handle()
-async def handle_sell_small(uid: int = Depends(get_uid)) -> None:
+async def handle_sell_small(
+    uid: int = Depends(get_uid), user_wallet: UserWallet = Depends(wallet_manager)
+) -> None:
     user_info = await FishingManager.get_user_info(uid)
     fishes = "🐟🦀🦐🐡🐠"
 
@@ -352,7 +369,7 @@ async def handle_sell_small(uid: int = Depends(get_uid)) -> None:
             result.append(f"{fish}×{count} → {gold}金币")
 
     if total_gold > 0:
-        money.increase_user_money(uid, "gold", total_gold)
+        user_wallet.gold += total_gold
         await FishingManager.increase_value(
             uid, "statis", "sell", total_gold, user_info
         )
@@ -372,7 +389,9 @@ sell_all_cmd = on_fullmatch(
 
 
 @sell_all_cmd.handle()
-async def handle_sell_all(uid: int = Depends(get_uid)) -> None:
+async def handle_sell_all(
+    uid: int = Depends(get_uid), user_wallet: UserWallet = Depends(wallet_manager)
+) -> None:
     user_info = await FishingManager.get_user_info(uid)
     fishes = "🐟🦀🦐🐡🐠🦈🌟"
 
@@ -388,7 +407,7 @@ async def handle_sell_all(uid: int = Depends(get_uid)) -> None:
             result.append(f"{fish}×{count} → {gold}金币")
 
     if total_gold > 0:
-        money.increase_user_money(uid, "gold", total_gold)
+        user_wallet.gold += total_gold
         await FishingManager.increase_value(
             uid, "statis", "sell", total_gold, user_info
         )
@@ -477,14 +496,14 @@ async def handle_stat(uid: int = Depends(get_uid)) -> None:
 # ===== 漂流瓶功能 =====
 
 # ----- 买漂流瓶 -----
-buy_bottle_cmd = on_command(
-    "买漂流瓶", priority=5, block=True
-)
+buy_bottle_cmd = on_command("买漂流瓶", priority=5, block=True)
 
 
 @buy_bottle_cmd.handle()
 async def handle_buy_bottle(
-    uid: int = Depends(get_uid), args: Message = CommandArg()
+    uid: int = Depends(get_uid),
+    args: Message = CommandArg(),
+    user_wallet: UserWallet = Depends(wallet_manager),
 ) -> None:
     message = args.extract_plain_text()
     num = int(message) if message.isdigit() else 1
@@ -492,23 +511,19 @@ async def handle_buy_bottle(
     if num > 10:
         await buy_bottle_cmd.finish("一次只能购买10个漂流瓶喔", at_sender=True)
 
-    user_gold = money.get_user_money(uid, "gold") or 0
     cost = num * config.bottle_price
 
-    if user_gold < cost:
+    if user_wallet.gold < cost:
         await buy_bottle_cmd.finish("金币不足喔...", at_sender=True)
-        return
 
-    money.reduce_user_money(uid, "gold", cost)
+    user_wallet.gold -= cost
     await FishingManager.increase_value(uid, "fish", "✉", num)
 
     await buy_bottle_cmd.finish(f"成功买下{num}个漂流瓶~(金币-{cost})", at_sender=True)
 
 
 # ----- 合成漂流瓶 -----
-compound_bottle_cmd = on_command(
-    "合成漂流瓶", priority=5, block=True
-)
+compound_bottle_cmd = on_command("合成漂流瓶", priority=5, block=True)
 
 
 @compound_bottle_cmd.handle()
@@ -538,9 +553,7 @@ async def handle_compound_bottle(
 
 
 # ----- 扔漂流瓶 -----
-throw_bottle_cmd = on_command(
-    "扔漂流瓶", priority=5, block=True
-)
+throw_bottle_cmd = on_command("扔漂流瓶", priority=5, block=True)
 
 
 @throw_bottle_cmd.handle()
@@ -562,7 +575,7 @@ async def handle_throw_bottle(
         await throw_bottle_cmd.finish("背包里没有漂流瓶喔", at_sender=True)
 
     content = args.extract_plain_text()
-    if content== "":
+    if content == "":
         await throw_bottle_cmd.finish("漂流瓶内容不能为空喔", at_sender=True)
 
     if len(content) > 500:
@@ -585,9 +598,7 @@ async def handle_throw_bottle(
 
 
 # ----- 捡漂流瓶 -----
-pick_bottle_cmd = on_fullmatch(
-    "捡漂流瓶", priority=5, block=True
-)
+pick_bottle_cmd = on_fullmatch("捡漂流瓶", priority=5, block=True)
 
 
 @pick_bottle_cmd.handle()
@@ -647,9 +658,7 @@ async def handle_pick_bottle(uid: int = Depends(get_uid)) -> None:
 
 
 # ----- 漂流瓶数量 -----
-bottle_count_cmd = on_fullmatch(
-    "漂流瓶数量", priority=5, block=True
-)
+bottle_count_cmd = on_fullmatch("漂流瓶数量", priority=5, block=True)
 
 
 @bottle_count_cmd.handle()
@@ -663,22 +672,21 @@ async def handle_bottle_count() -> None:
 
 
 # ----- 评论漂流瓶 -----
-comment_bottle_cmd = on_command(
-    "评论漂流瓶", priority=5, block=True
-)
+comment_bottle_cmd = on_command("评论漂流瓶", priority=5, block=True)
 
 
 @comment_bottle_cmd.handle()
 async def handle_comment_bottle(
-    uid: int = Depends(get_uid), args: Message = CommandArg()
+    uid: int = Depends(get_uid),
+    args: Message = CommandArg(),
+    user_wallet: UserWallet = Depends(wallet_manager),
 ):
     if not comm_freq.check(uid):
         await comment_bottle_cmd.finish(
             f"休息一会再评论吧~({int(comm_freq.left_time(uid))}s)"
         )
 
-    user_gold = money.get_user_money(uid, "gold") or 0
-    if user_gold < config.comment_price:
+    if user_wallet.gold < config.comment_price:
         await comment_bottle_cmd.finish(
             f"评论漂流瓶需要{config.comment_price}枚金币", at_sender=True
         )
@@ -699,7 +707,7 @@ async def handle_comment_bottle(
     if not BottleManager.add_comment(bottle_id, uid, content):
         await comment_bottle_cmd.finish("找不到这个漂流瓶", at_sender=True)
 
-    money.reduce_user_money(uid, "gold", config.comment_price)
+    user_wallet.gold -= config.comment_price
     comm_freq.start_cd(uid)
 
     await comment_bottle_cmd.finish(
