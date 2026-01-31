@@ -765,6 +765,62 @@ async def handle_evolve(event: Event, bot: Bot, uid: int = Depends(get_uid)):
         await evolve_cmd.finish(
             f"{pet['name']}还不满足进化条件（成长值需达到上限）", at_sender=True)
 
+# ===== 重置进化路线 =====
+reroll_evolution_cmd = on_command("重置进化路线", aliases={"重新进化"}, priority=5, block=True)
+
+@reroll_evolution_cmd.handle()
+async def handle_reroll_evolution(event: Event, bot: Bot, uid: int = Depends(get_uid)):
+    if not await use_user_item(uid, "时之泪"):
+        await reroll_evolution_cmd.finish("你没有时之泪！", at_sender=True)
+
+    pet = await get_user_pet(uid)
+    if not pet or pet.get("temp_data"):
+        await add_user_item(uid, "时之泪")
+        await reroll_evolution_cmd.finish("你还没有宠物！", at_sender=True)
+
+    pet = await update_pet_status(pet)
+    if pet.get("runaway"):
+        await add_user_item(uid, "时之泪")
+        await reroll_evolution_cmd.finish(f"你的宠物【{pet['name']}】离家出走了，无法重置进化！", at_sender=True)
+
+    if pet["stage"] != 1:
+        await add_user_item(uid, "时之泪")
+        await reroll_evolution_cmd.finish("只有成长体宠物可以重置进化路线！", at_sender=True)
+
+    original_type = pet["type"]
+    
+    if random.random() < 0.5:
+        await reroll_evolution_cmd.finish(f"{pet['name']}的进化分支没有改变。", at_sender=True)
+
+    base_type = None
+    for base, evolutions in EVOLUTIONS.items():
+        if isinstance(evolutions, dict):
+            for evo_name, evo_type in evolutions.items():
+                if evo_type == original_type:
+                    base_type = base
+                    break
+        if base_type:
+            break
+
+    if not base_type:
+        await add_user_item(uid, "时之泪")
+        await reroll_evolution_cmd.finish("无法找到原始进化路线。", at_sender=True)
+
+    evolution_options = EVOLUTIONS[base_type]
+    available_choices = [k for k in evolution_options.keys() 
+                        if evolution_options[k] != original_type]
+
+    if not available_choices:
+        await add_user_item(uid, "时之泪")
+        await reroll_evolution_cmd.finish("没有可用的进化分支改变。", at_sender=True)
+
+    evolution_choice = random.choice(available_choices)
+    new_type = evolution_options[evolution_choice]
+    pet["type"] = new_type
+
+    await update_user_pet(uid, pet)
+    await reroll_evolution_cmd.finish(f"✨ {pet['name']}的进化分支改变了！现在是{new_type}！", at_sender=True)
+
 
 # ===== 宠物改名 =====
 rename_cmd = on_command("宠物改名", priority=5, block=True)
