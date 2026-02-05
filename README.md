@@ -108,12 +108,68 @@
 
 ---
 
-### ❌ 未迁移模块 (Legacy List)
-以下模块尚未包含在 `koinoribot_nb2` 插件包中：
-- `ability` (超能力)
-- `Arcaea`, `ba_wiki`, `danbooru` (图片/游戏查询)
-- `groupchat`, `no_thanks`, `tuchinghua`, `luxunsaid` (娱乐功能)
-- 以及其他的辅助插件。
+### 🎮 其余小游戏 (Mini Games)
+| 模块名称 | 备注 | 迁移状况 | onebot测试情况 | qqbot测试情况 |
+| :--- | :--- | :--- | :--- | :--- |
+| english_guess | 猜单词(wordle/猜数字/猜日语) | ✅ 已迁移 | 未测试 | 未测试 |
+| twenty_four | 24点游戏 | ❌ 未迁移 | - | - |
+| yakuman | 役满模拟 | ❌ 未迁移 | - | - |
+| tarot_ba | BA塔罗牌 | ❌ 未迁移 | - | - |
+| goldboom | 金币炸弹 | ❌ 未迁移 | - | - |
+| choose_or | 选择困难症 | ❌ 未迁移 | - | - |
+
+---
+
+### 🖼️ 图片/查询功能 (Image & Query)
+| 模块名称 | 备注 | 迁移状况 | onebot测试情况 | qqbot测试情况 |
+| :--- | :--- | :--- | :--- | :--- |
+| Arcaea | Arcaea查分 | ❌ 未迁移 | - | - |
+| ba_wiki | BlueArchive Wiki | ❌ 未迁移 | - | - |
+| danbooru | Danbooru图片 | ❌ 未迁移 | - | - |
+| nihon_dict | 日语词典 | ❌ 未迁移 | - | - |
+| kusa_img | 草图生成 | ❌ 未迁移 | - | - |
+| random_waifu | 随机老婆 | ❌ 未迁移 | - | - |
+
+---
+
+### 💬 聊天/娱乐功能 (Chat & Fun)
+| 模块名称 | 备注 | 迁移状况 | onebot测试情况 | qqbot测试情况 |
+| :--- | :--- | :--- | :--- | :--- |
+| groupchat | 群聊功能 | ❌ 未迁移 | - | - |
+| no_thanks | 不用谢 | ❌ 未迁移 | - | - |
+| luxunsaid | 鲁迅说 | ❌ 未迁移 | - | - |
+| call_me_please | 叫我 | ❌ 未迁移 | - | - |
+| crazy_fan | 发癫 | ❌ 未迁移 | - | - |
+| dirt_love | 土味情话 | ❌ 未迁移 | - | - |
+| say_goodnight | 晚安 | ❌ 未迁移 | - | - |
+| whattoeat | 今天吃什么 | ❌ 未迁移 | - | - |
+| emojimix_nonebot | Emoji混合 | ❌ 未迁移 | - | - |
+| poke | 戳一戳 | ❌ 未迁移 | - | - |
+| shushuwoa | 数数蛙 | ❌ 未迁移 | - | - |
+| perish_together | 同归于尽 | ❌ 未迁移 | - | - |
+
+---
+
+### 🔧 工具/辅助功能 (Utilities)
+| 模块名称 | 备注 | 迁移状况 | onebot测试情况 | qqbot测试情况 |
+| :--- | :--- | :--- | :--- | :--- |
+| ability | 超能力 | ❌ 未迁移 | - | - |
+| weather_son | 天气查询 | ❌ 未迁移 | - | - |
+| moe_tts | 萌音TTS | ❌ 未迁移 | - | - |
+| music_fader | 音乐渐变 | ❌ 未迁移 | - | - |
+| chat_scrshot | 聊天截图 | ❌ 未迁移 | - | - |
+| cartoon | 动漫化 | ❌ 未迁移 | - | - |
+| rainbow_p | 彩虹屁 | ❌ 未迁移 | - | - |
+| sinaimg | 新浪图床 | ❌ 未迁移 | - | - |
+| help | 帮助 | ❌ 未迁移 | - | - |
+| koimanage | 管理功能 | ❌ 未迁移 | - | - |
+| clear | 清理 | ❌ 未迁移 | - | - |
+| delete_msg | 撤回消息 | ❌ 未迁移 | - | - |
+| deletemsg_plus | 撤回消息Plus | ❌ 未迁移 | - | - |
+| print_group_list | 群列表 | ❌ 未迁移 | - | - |
+| public_whitelist | 公共白名单 | ❌ 未迁移 | - | - |
+| DetectDisgust | 厌恶检测 | ❌ 未迁移 | - | - |
+| lxy | lxy功能 | ❌ 未迁移 | - | - |
 
 ## 3. 未来规划
 

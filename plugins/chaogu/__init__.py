@@ -609,9 +609,6 @@ async def perform_gamble_round(uid: int) -> dict:
     # 计算胜率
     get_gamble_win_probability(old_gold, uid)
     win_probability = gambling_sessions[uid]['win']
-    
-    # 超级用户加成（可选，保持原逻辑）
-    
     if uid in superusers:
         win_probability += 0.5
     
