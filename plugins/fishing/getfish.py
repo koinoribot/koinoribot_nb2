@@ -19,6 +19,7 @@ from ...tools import get_uid
 from ...koinori_config import config
 from .util import DatabaseManager
 from .serif import GET_FISH_SERIF, NO_FISH_SERIF, COOL_TIME_SERIF
+superusers = getattr(config, 'superusers', [])
 # ===== 常量配置 =====
 FISH_LIST = ['🐟', '🦐', '🦀', '🐡', '🐠', '🦈', '🌟']
 FISH_PRICE = {
@@ -260,7 +261,7 @@ class FishingManager:
         fish_count, limit_count = DatabaseManager.get_user_fish_count_today(uid)
         rest_count = limit_count - fish_count
 
-        if uid not in config.SUPERUSERS and not limit:
+        if uid not in superusers and not limit:
             await matcher.send(f'\n今日钓鱼次数已达上限喔...你还能钓鱼{rest_count}次。\n明天再来吧~', at_sender=True)
             if auto_buy:
                 user_wallet.gold += actual_cost
@@ -328,7 +329,7 @@ class FishingManager:
                 summary_message += "\n幸运币+1"
 
         # 添加今日次数提示
-        if uid not in config.SUPERUSERS:
+        if uid not in superusers:
             fish_count, limit_count = DatabaseManager.get_user_fish_count_today(uid)
             rest_count = limit_count - fish_count
             summary_message += f"\n\n今日已钓鱼：{fish_count}次\n剩余次数：{rest_count}次"
