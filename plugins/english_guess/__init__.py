@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 from typing import Dict, Optional
 
-from nonebot import on_command, on_message, get_driver
+from nonebot import on_command, get_driver
 from nonebot.adapters import Event, Bot, Message
 from nonebot.plugin import PluginMetadata
 from nonebot.params import Depends, CommandArg
@@ -160,7 +160,7 @@ async def handle_wordle(event: Event, bot: Bot, args: Message = CommandArg(), gi
     bg.save(str(temp_path / f'{gid}.png'))
     
     img_msg = MessageSegment.image(f"base64://{bg.pic2bs4()}")
-    await wordle_cmd.finish(img_msg + f"\n请直接发送单词~当前为{level}词库\n限时{expire_time[word_len]}秒", at_sender=True)
+    await wordle_cmd.finish(img_msg + f"\n请发送【我猜是 对应单词】进行猜测~当前为{level}词库\n限时{expire_time[word_len]}秒，发送【我要提示/我不猜了】可获取提示或退出", at_sender=True)
 
 
 # ===== 猜数字 =====
@@ -198,7 +198,7 @@ async def handle_digitle(event: Event, bot: Bot, args: Message = CommandArg(), g
     bg.save(str(temp_path / f'{gid}.png'))
     
     img_msg = MessageSegment.image(f"base64://{bg.pic2bs4()}")
-    await digitle_cmd.finish(img_msg + "\n请直接发送数字~", at_sender=True)
+    await digitle_cmd.finish(img_msg + f"\n请发送【我猜是 对应数字】进行猜测~\n发送【我不猜了】可退出游戏", at_sender=True)
 
 
 # ===== 猜日语 =====
@@ -254,21 +254,76 @@ async def handle_tangole(event: Event, bot: Bot, args: Message = CommandArg(), g
     
     img_msg = MessageSegment.image(f"base64://{bg.pic2bs4()}")
     await tangole_cmd.finish(
-        img_msg + f"\n请直接发送假名来猜词语~当前为{trans[level]}日语词库，词义为【{rand_tango['mean']}】\n限时5分钟.",
+        img_msg + f"\n请发送【我猜是 对应假名】进行猜测~当前为{trans[level]}日语词库，词义为【{rand_tango['mean']}】\n限时5分钟，发送【我要提示/我不猜了】可获取提示或退出",
         at_sender=True
     )
 
+# ===== 退出游戏 =====
+quit_cmd = on_command("我不猜了", priority=5, block=True)
 
-# ===== 游戏响应处理 =====
-guess_handler = on_message(priority=10, block=False)
-
-@guess_handler.handle()
-async def handle_guess(event: Event, bot: Bot, gid: str = Depends(get_group_id)):
+@quit_cmd.handle()
+async def handle_quit(event: Event, bot: Bot, gid: str = Depends(get_group_id)):
     session = find_session(gid)
     if not session:
-        return
+        await quit_cmd.finish("当前没有进行中的猜单词游戏喔~", at_sender=True)
     
-    message = event.get_plaintext().strip()
+    game_type = session.get('type')
+    if game_type == '英语单词':
+        word = session['word']
+        pos = session['pos']
+        trans = session['trans']
+        await quit_cmd.finish(f'已退出~\n这个单词是{word}\n{pos}{trans}', at_sender=True)
+    elif game_type == '数字':
+        answer = session['answer']
+        await quit_cmd.finish(f'已退出~\n这个数字是{answer}', at_sender=True)
+    elif game_type == '日语单词':
+        kana = session['kana']
+        jpword = session['jpword']
+        yomi = session['yomi']
+        mean = session['mean']
+        sample = f"\n{session.get('sample', '')}" if session.get('sample') else ''
+        await quit_cmd.finish(f'已退出~\n正确答案是{kana}\n{yomi}{mean}{sample}', at_sender=True)
+    
+    close_session(gid)
+
+
+# ===== 获取提示 =====
+hint_cmd = on_command("我要提示", priority=5, block=True)
+
+@hint_cmd.handle()
+async def handle_hint(event: Event, bot: Bot, gid: str = Depends(get_group_id)):
+    session = find_session(gid)
+    if not session:
+        await hint_cmd.finish("当前没有进行中的猜单词游戏喔~", at_sender=True)
+    
+    game_type = session.get('type')
+    
+    if game_type == '英语单词':
+        trans = session['trans']
+        if session['times'] < 4:
+            await hint_cmd.finish(f"还需要猜{5 - session['times']}次才能获取提示喔", at_sender=True)
+        else:
+            await hint_cmd.finish(f'这个单词的意思是：{trans}', at_sender=True)
+    elif game_type == '数字':
+        await hint_cmd.finish('猜数字真的有提示的必要嘛?🔍', at_sender=True)
+    elif game_type == '日语单词':
+        mean = session['mean']
+        await hint_cmd.finish(f'这个单词的意思是：{mean}', at_sender=True)
+
+
+# ===== 游戏响应处理 =====
+guess_handler = on_command("我猜是", priority=5, block=True)
+
+@guess_handler.handle()
+async def handle_guess(event: Event, bot: Bot, args: Message = CommandArg(), gid: str = Depends(get_group_id)):
+    session = find_session(gid)
+    if not session:
+        await guess_handler.finish("当前没有进行中的猜单词游戏喔~", at_sender=True)
+    
+    message = args.extract_plain_text().strip()
+    if not message:
+        await guess_handler.finish("请在'我猜是'后面加上你的答案喔~", at_sender=True)
+    
     game_type = session.get('type', '')
     
     if game_type == '英语单词':
@@ -283,7 +338,7 @@ async def handle_english_guess(event: Event, bot: Bot, gid: str, session: Dict, 
     """处理英语单词猜测"""
     # 检查输入是否为纯字母
     rematch = re.findall('^[a-zA-z]+$', message)
-    if not rematch and message not in ['提示', '退出', '结束']:
+    if not rematch:
         return
     
     word = session['word']
@@ -308,22 +363,13 @@ async def handle_english_guess(event: Event, bot: Bot, gid: str, session: Dict, 
     message = message.lower()
     
     # 长度检查
-    if len(message) != length and message not in ['提示', '退出', '结束']:
+    # 长度检查
+    if len(message) != length:
         await bot.send(event, f'要猜的单词长度为{length}喔', at_sender=True)
         return
     
     # 特殊命令处理
     if message not in check_list.get(str(length), []):
-        if message in ['退出', '结束']:
-            await bot.send(event, f'已退出~\n这个单词是{word}\n{pos}{trans}', at_sender=True)
-            close_session(gid)
-            return
-        if message == '提示':
-            if session['times'] < 4:
-                await bot.send(event, f"还需要猜{5 - session['times']}次才能获取提示喔", at_sender=True)
-            else:
-                await bot.send(event, f'这个单词的意思是：{trans}', at_sender=True)
-            return
         await bot.send(event, f'这个单词不对喔', at_sender=True)
         return
     
@@ -389,11 +435,6 @@ async def handle_digit_guess(event: Event, bot: Bot, gid: str, session: Dict, me
     
     # 检查输入
     if not message.isdigit():
-        if message == '退出':
-            await bot.send(event, f'已退出~\n这个数字是{answer}', at_sender=True)
-            close_session(gid)
-        elif message == '提示':
-            await bot.send(event, '猜数字真的有提示的必要嘛?🔍', at_sender=True)
         return
     
     if len(message) == 1:
@@ -472,11 +513,6 @@ async def handle_japanese_guess(event: Event, bot: Bot, gid: str, session: Dict,
     # 检查输入是否为假名
     rematch = re.findall(r'([\u3040-\u3098]+)', message)
     if len(rematch) != 1:
-        if message == '退出':
-            await bot.send(event, f'已退出~\n正确答案是{kana}\n{yomi}{mean}\n{sample}', at_sender=True)
-            close_session(gid)
-        elif message == '提示':
-            await bot.send(event, f'这个单词的意思是：{mean}', at_sender=True)
         return
     
     if len(rematch[0]) != length:
