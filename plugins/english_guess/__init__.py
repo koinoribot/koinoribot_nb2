@@ -163,7 +163,41 @@ async def handle_wordle(event: Event, bot: Bot, args: Message = CommandArg(), gi
     await wordle_cmd.finish(img_msg + f"\n请发送【我猜是 对应单词】进行猜测~当前为{level}词库\n限时{expire_time[word_len]}秒，发送【我要提示/我不猜了】可获取提示或退出", at_sender=True)
 
 
+
 # ===== 猜数字 =====
+def draw_digit_legend(bg: BuildImage) -> BuildImage:
+    """绘制猜数字图例"""
+    extra_h = 160
+    new_bg = BuildImage(bg.w, bg.h + extra_h, color=(255, 255, 255), font_size=15)
+    new_bg.paste(bg, (0, 0))
+    
+    start_y = bg.h + 10
+    left_m = 20
+    box_s = 20
+    line_s = 35
+    
+    # 1. Gray
+    new_bg.rectangle((left_m, start_y, left_m + box_s, start_y + box_s), fill=color_light_gray)
+    new_bg.text((left_m + 30, start_y), "数字正确但位置不对", fill=font_color)
+    
+    # 2. Blue
+    start_y += line_s
+    new_bg.rectangle((left_m, start_y, left_m + box_s, start_y + box_s), fill=color_blue)
+    new_bg.text((left_m + 30, start_y), "数字正确且位置正确", fill=font_color)
+    
+    # 3. Green
+    start_y += line_s
+    new_bg.text((left_m, start_y), "绿色", fill=color_green)
+    new_bg.text((left_m + 45, start_y), "整个数比正确答案小", fill=font_color)
+
+    # 4. Red
+    start_y += line_s
+    new_bg.text((left_m, start_y), "红色", fill=color_red)
+    new_bg.text((left_m + 45, start_y), "整个数比正确答案大", fill=font_color)
+    
+    return new_bg
+
+
 digitle_cmd = on_command("猜数字", priority=5, block=True)
 
 @digitle_cmd.handle()
@@ -195,6 +229,7 @@ async def handle_digitle(event: Event, bot: Bot, args: Message = CommandArg(), g
     # 生成背景图片
     bg_path = plugin_dir / 'data' / 'imgs' / 'dgt' / f'{length}len.png'
     bg = BuildImage(0, 0, background=str(bg_path))
+    bg = draw_digit_legend(bg)
     bg.save(str(temp_path / f'{gid}.png'))
     
     img_msg = MessageSegment.image(f"base64://{bg.pic2bs4()}")
