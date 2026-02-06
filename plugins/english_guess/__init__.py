@@ -423,13 +423,12 @@ async def handle_english_guess(event: Event, bot: Bot, gid: str, session: Dict, 
     message = message.lower()
     
     # 长度检查
-    # 长度检查
     if len(message) != length:
         await bot.send(event, f'要猜的单词长度为{length}喔', at_sender=True)
         return
     
     # 特殊命令处理
-    if message not in check_list.get(str(length), []):
+    if length >= len(check_list) or message not in check_list[length]:
         await bot.send(event, f'这个单词不对喔', at_sender=True)
         return
     
