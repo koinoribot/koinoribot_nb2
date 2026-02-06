@@ -14,11 +14,12 @@ import base64
 from datetime import datetime, timedelta
 from typing import Optional, Dict
 
-from nonebot import on_command, on_regex, on_fullmatch, get_driver, require
+from nonebot import on_command, on_regex, get_driver, require
+from nonebot.rule import CommandRule
 from nonebot.exception import FinishedException
 from nonebot.plugin import PluginMetadata
-from nonebot.adapters import Event, Bot
-from nonebot.params import Depends, RegexGroup
+from nonebot.adapters import Event, Bot, Message
+from nonebot.params import Depends, RegexGroup, CommandArg
 from nonebot import logger
 
 from ... import money
@@ -45,13 +46,13 @@ from .stock_utils import (
 # uid_manager 用于 QQ号转UID
 from ... import uid_manager
 # 宠物相关
-from ..chongwu.pet import get_user_pets, add_user_item
+from ..chongwu.pet import get_user_pet, add_user_item
 #su
 superusers = getattr(config, 'superusers', [])
 __plugin_meta__ = PluginMetadata(
     name="chaogu",
     description="股票市场系统 - 完整版（含幸运游戏、转盘、低保）",
-    usage="股票列表 / 买入 / 卖出 / 我的股仓 / 一场豪赌 / 幸运大转盘 / 领低保 等",
+    usage="股票列表 / 买入 / 卖出 / 我的股仓 / 幸运游戏 / 幸运大转盘 / 领低保 等",
 )
 
 # 事件触发概率配置
@@ -251,20 +252,26 @@ async def handle_stock_trend(event: Event, bot: Bot, groups: tuple = RegexGroup(
 
 
 # ===== 买入股票 =====
-buy_stock_cmd = on_regex(r'^买入\s*(.+股)\s*(\d+)$', priority=5, block=True)
+buy_stock_cmd = on_command("买入", priority=5, block=True)
 
 @buy_stock_cmd.handle()
-async def handle_buy_stock(event: Event, bot: Bot, uid: int = Depends(get_uid), groups: tuple = RegexGroup()):
+async def handle_buy_stock(event: Event, bot: Bot, uid: int = Depends(get_uid), args: Message = CommandArg()):
     # 检查是否在赌博中
     if uid in gambling_sessions and gambling_sessions[uid].get('active', False):
-        await buy_stock_cmd.finish("⚠️ 你正在进行一场豪赌，无法进行股票交易。请先完成赌局或'见好就收'。", at_sender=True)
+        await buy_stock_cmd.finish("⚠️ 你正在进行幸运游戏，无法进行股票交易。请先完成赌局或'见好就收'。", at_sender=True)
     
-    # 使用 RegexGroup 获取匹配到的参数
-    if not groups or len(groups) < 2:
-        await buy_stock_cmd.finish("无法解析购买指令，请检查格式。", at_sender=True)
+    # 解析参数
+    arg_text = args.extract_plain_text().strip()
+    parts = arg_text.split()
     
-    stock_name = groups[0]
-    amount_to_buy = int(groups[1])
+    if not parts or len(parts) < 2:
+        await buy_stock_cmd.finish("无法解析购买指令，请检查格式。(例：买入 萝莉股 10)", at_sender=True)
+    
+    stock_name = parts[0]
+    try:
+        amount_to_buy = int(parts[1])
+    except ValueError:
+        await buy_stock_cmd.finish("购买数量必须是正整数", at_sender=True)
     
     if amount_to_buy <= 0:
         await buy_stock_cmd.finish("购买数量必须是正整数", at_sender=True)
@@ -322,20 +329,28 @@ async def handle_buy_stock(event: Event, bot: Bot, uid: int = Depends(get_uid), 
 
 
 # ===== 卖出股票 =====
-sell_stock_cmd = on_regex(r'^卖出\s*(.+股)(?:\s*(\d+))?$', priority=5, block=True)
+sell_stock_cmd = on_command("卖出", priority=5, block=True)
 
 @sell_stock_cmd.handle()
-async def handle_sell_stock(event: Event, bot: Bot, uid: int = Depends(get_uid), groups: tuple = RegexGroup()):
+async def handle_sell_stock(event: Event, bot: Bot, uid: int = Depends(get_uid), args: Message = CommandArg()):
     # 检查是否在赌博中
     if uid in gambling_sessions and gambling_sessions[uid].get('active', False):
-        await sell_stock_cmd.finish("⚠️ 你正在进行一场豪赌，无法进行股票交易。请先完成赌局或'见好就收'。", at_sender=True)
+        await sell_stock_cmd.finish("⚠️ 你正在进行幸运游戏，无法进行股票交易。请先完成赌局或'见好就收'。", at_sender=True)
     
-    # 使用 RegexGroup 获取匹配到的参数
-    if not groups or len(groups) < 1:
-        await sell_stock_cmd.finish("无法解析卖出指令，请检查格式。", at_sender=True)
+    arg_text = args.extract_plain_text().strip()
+    parts = arg_text.split()
     
-    stock_name = groups[0]
-    amount_to_sell = int(groups[1]) if groups[1] else 9999
+    if not parts:
+        await sell_stock_cmd.finish("无法解析卖出指令，请检查格式。(例：卖出 萝莉股 10)", at_sender=True)
+    
+    stock_name = parts[0]
+    amount_to_sell = 9999
+    
+    if len(parts) > 1:
+        try:
+            amount_to_sell = int(parts[1])
+        except ValueError:
+            pass  # 默认为全部卖出
     
     if stock_name not in STOCKS:
         await sell_stock_cmd.finish(f"未知股票: {stock_name}", at_sender=True)
@@ -652,14 +667,14 @@ async def gold_change_record(uid: int, start_gold: int, final_gold: int) -> str:
     return record
 
 
-# ===== 一场豪赌 =====
-gamble_start_cmd = on_fullmatch("一场豪赌", priority=5, block=True)
+# ===== 幸运游戏 =====
+gamble_start_cmd = on_command("幸运游戏", priority=5, block=True)
 
 @gamble_start_cmd.handle()
 async def handle_start_gamble(event: Event, bot: Bot, uid: int = Depends(get_uid)):
     # 检查是否已在赌局中
     if uid in gambling_sessions and gambling_sessions[uid].get('active', False):
-        await gamble_start_cmd.finish("你正在进行一场豪赌，请先完成或使用 '见好就收' 结束当前赌局。", at_sender=True)
+        await gamble_start_cmd.finish("你正在进行幸运游戏，请先完成或使用 '见好就收' 结束当前赌局。", at_sender=True)
     
     # 检查每日限制
     
@@ -686,7 +701,7 @@ async def handle_start_gamble(event: Event, bot: Bot, uid: int = Depends(get_uid
     get_gamble_win_probability(gold, uid)
     win = gambling_sessions[uid]['win'] * 100
     
-    rules = f"""\n🎲 一场豪赌 规则 🎲：
+    rules = f"""\n🎲 幸运游戏 规则 🎲：
 1. 连续{MAX_GAMBLE_ROUNDS}轮豪赌，每一轮消耗1枚幸运币，你所持有的【全部金币】都有几率翻倍，或者骤减。
 2. 你可以在任何一轮结束后选择 '见好就收' 带着当前金币离场。
 3. 若任意一轮失败，则立即结束并离场。
@@ -700,7 +715,7 @@ async def handle_start_gamble(event: Event, bot: Bot, uid: int = Depends(get_uid
 
 
 # ===== 确认开始豪赌 =====
-gamble_confirm_cmd = on_fullmatch("确认", priority=5, block=True)
+gamble_confirm_cmd = on_command("确认", priority=5, block=True)
 
 @gamble_confirm_cmd.handle()
 async def handle_confirm_gamble(event: Event, bot: Bot, uid: int = Depends(get_uid)):
@@ -756,7 +771,7 @@ async def handle_confirm_gamble(event: Event, bot: Bot, uid: int = Depends(get_u
 
 
 # ===== 继续豪赌 =====
-gamble_continue_cmd = on_fullmatch("继续", priority=5, block=True)
+gamble_continue_cmd = on_command("继续", priority=5, block=True)
 
 @gamble_continue_cmd.handle()
 async def handle_continue_gamble(event: Event, bot: Bot, uid: int = Depends(get_uid)):
@@ -809,7 +824,7 @@ async def handle_continue_gamble(event: Event, bot: Bot, uid: int = Depends(get_
 
 
 # ===== 见好就收/算了 =====
-gamble_stop_cmd = on_fullmatch(("见好就收", "算了"), priority=5, block=True)
+gamble_stop_cmd = on_command("见好就收", aliases={"算了"}, priority=5, block=True)
 
 @gamble_stop_cmd.handle()
 async def handle_stop_gamble(event: Event, bot: Bot, uid: int = Depends(get_uid)):
@@ -836,7 +851,7 @@ async def handle_stop_gamble(event: Event, bot: Bot, uid: int = Depends(get_uid)
 
 
 # ===== 豪赌榜 =====
-gamble_ranking_cmd = on_fullmatch("豪赌榜", priority=5, block=True)
+gamble_ranking_cmd = on_command("豪赌榜", aliases={"游戏榜"}, priority=5, block=True)
 
 @gamble_ranking_cmd.handle()
 async def handle_gamble_ranking(event: Event, bot: Bot):
@@ -865,7 +880,7 @@ async def handle_gamble_ranking(event: Event, bot: Bot):
 
 
 # ===== 戒赌榜 =====
-gamble_loss_ranking_cmd = on_fullmatch(("戒赌榜", "零花钱贡献榜"), priority=5, block=True)
+gamble_loss_ranking_cmd = on_command("戒赌榜", aliases={"零花钱贡献榜"}, priority=5, block=True)
 
 @gamble_loss_ranking_cmd.handle()
 async def handle_gamble_loss_ranking(event: Event, bot: Bot):
@@ -894,7 +909,7 @@ async def handle_gamble_loss_ranking(event: Event, bot: Bot):
 
 
 # ===== 豪赌记录 =====
-gamble_record_cmd = on_fullmatch(("豪赌记录", "零花钱记录", "金币记录"), priority=5, block=True)
+gamble_record_cmd = on_command("豪赌记录", aliases={"游戏记录"}, priority=5, block=True)
 
 @gamble_record_cmd.handle()
 async def handle_gamble_record(event: Event, bot: Bot, uid: int = Depends(get_uid)):
@@ -971,7 +986,7 @@ async def give_prize(uid: int, prize_tier: str) -> str:
         return f"{prize_info['chinese']} *{prize_amount}"
 
 
-turntable_cmd = on_fullmatch(("幸运大转盘", "幸运转盘"), priority=5, block=True)
+turntable_cmd = on_command("幸运转盘", aliases={"幸运大转盘"}, priority=5, block=True)
 
 @turntable_cmd.handle()
 async def handle_turntable(event: Event, bot: Bot, uid: int = Depends(get_uid)):
@@ -1006,7 +1021,7 @@ async def handle_turntable(event: Event, bot: Bot, uid: int = Depends(get_uid)):
 
 
 # ===== 领低保 =====
-dibao_cmd = on_fullmatch("领低保", priority=5, block=True)
+dibao_cmd = on_command("领低保", priority=5, block=True)
 
 @dibao_cmd.handle()
 async def handle_dibao(event: Event, bot: Bot, uid: int = Depends(get_uid)):
@@ -1054,31 +1069,39 @@ TRANSFER_FEE_RATE = getattr(config, 'transfer_fee', 0.1)
 MIN_REST = getattr(config, 'min_rest', 1000)
 
 # 转账uid [目标uid] [金额]
-transfer_uid_cmd = on_regex(r'^转账uid\s*(\d+)\s+(\d+)$', priority=5, block=True)
+transfer_uid_cmd = on_command("转账uid", priority=5, block=True)
 
 @transfer_uid_cmd.handle()
-async def handle_transfer_uid(event: Event, bot: Bot, uid: int = Depends(get_uid), groups: tuple = RegexGroup()):
+async def handle_transfer_uid(event: Event, bot: Bot, uid: int = Depends(get_uid), args: Message = CommandArg()):
     """通过UID转账"""
-    if not groups or len(groups) < 2:
+    parts = args.extract_plain_text().strip().split()
+    if len(parts) < 2:
         await transfer_uid_cmd.finish("格式：转账uid [目标uid] [金额]", at_sender=True)
     
-    target_uid = int(groups[0])
-    amount = int(groups[1])
+    try:
+        target_uid = int(parts[0])
+        amount = int(parts[1])
+    except ValueError:
+        await transfer_uid_cmd.finish("UID和金额必须是数字！", at_sender=True)
     
     await _do_transfer(transfer_uid_cmd, uid, target_uid, amount)
 
 
 # 转账qq [目标QQ号] [金额]
-transfer_qq_cmd = on_regex(r'^转账qq\s*(\d+)\s+(\d+)$', priority=5, block=True)
+transfer_qq_cmd = on_command("转账qq", priority=5, block=True)
 
 @transfer_qq_cmd.handle()
-async def handle_transfer_qq(event: Event, bot: Bot, uid: int = Depends(get_uid), groups: tuple = RegexGroup()):
+async def handle_transfer_qq(event: Event, bot: Bot, uid: int = Depends(get_uid), args: Message = CommandArg()):
     """通过QQ号转账"""
-    if not groups or len(groups) < 2:
+    parts = args.extract_plain_text().strip().split()
+    if len(parts) < 2:
         await transfer_qq_cmd.finish("格式：转账qq [目标QQ号] [金额]", at_sender=True)
     
-    target_qq = groups[0]
-    amount = int(groups[1])
+    target_qq = parts[0]
+    try:
+        amount = int(parts[1])
+    except ValueError:
+        await transfer_qq_cmd.finish("金额必须是数字！", at_sender=True)
     
     # QQ号转UID（不自动创建）
     target_uid = uid_manager.get_uid_by_external_id("onebot", target_qq)
@@ -1137,40 +1160,48 @@ async def _do_transfer(cmd, sender_uid: int, target_uid: int, amount: int):
 # ===== 管理员打款功能 (uid/qq 两种模式) =====
 
 # 打款uid [目标uid] [金额]
-admin_add_uid_cmd = on_regex(r'^打款uid\s*(\d+)\s+(\d+)$', priority=5, block=True)
+admin_add_uid_cmd = on_command("打款uid", priority=5, block=True)
 
 @admin_add_uid_cmd.handle()
-async def handle_admin_add_uid(event: Event, bot: Bot, uid: int = Depends(get_uid), groups: tuple = RegexGroup()):
+async def handle_admin_add_uid(event: Event, bot: Bot, uid: int = Depends(get_uid), args: Message = CommandArg()):
     """管理员通过UID打款"""
     
     if uid not in superusers:
         await admin_add_uid_cmd.finish('权限不足', at_sender=True)
     
-    if not groups or len(groups) < 2:
+    parts = args.extract_plain_text().strip().split()
+    if len(parts) < 2:
         await admin_add_uid_cmd.finish("格式：打款uid [目标uid] [金额]", at_sender=True)
     
-    target_uid = int(groups[0])
-    amount = int(groups[1])
+    try:
+        target_uid = int(parts[0])
+        amount = int(parts[1])
+    except ValueError:
+        await admin_add_uid_cmd.finish("UID和金额必须是数字！", at_sender=True)
     
     money.increase_user_money(target_uid, 'gold', amount)
     await admin_add_uid_cmd.finish(f'已向 UID:{target_uid} 打款 {amount} 金币', at_sender=True)
 
 
 # 打款qq [目标QQ号] [金额]
-admin_add_qq_cmd = on_regex(r'^打款qq\s*(\d+)\s+(\d+)$', priority=5, block=True)
+admin_add_qq_cmd = on_command("打款qq", priority=5, block=True)
 
 @admin_add_qq_cmd.handle()
-async def handle_admin_add_qq(event: Event, bot: Bot, uid: int = Depends(get_uid), groups: tuple = RegexGroup()):
+async def handle_admin_add_qq(event: Event, bot: Bot, uid: int = Depends(get_uid), args: Message = CommandArg()):
     """管理员通过QQ号打款"""
     
     if uid not in superusers:
         await admin_add_qq_cmd.finish('权限不足', at_sender=True)
     
-    if not groups or len(groups) < 2:
+    parts = args.extract_plain_text().strip().split()
+    if len(parts) < 2:
         await admin_add_qq_cmd.finish("格式：打款qq [目标QQ号] [金额]", at_sender=True)
     
-    target_qq = groups[0]
-    amount = int(groups[1])
+    target_qq = parts[0]
+    try:
+        amount = int(parts[1])
+    except ValueError:
+        await admin_add_qq_cmd.finish("金额必须是数字！", at_sender=True)
     
     # QQ号转UID
     target_uid = uid_manager.get_uid_by_external_id("onebot", target_qq)
@@ -1184,20 +1215,24 @@ async def handle_admin_add_qq(event: Event, bot: Bot, uid: int = Depends(get_uid
 # ===== 管理员扣款功能 (uid/qq 两种模式) =====
 
 # 扣款uid [目标uid] [金额]
-admin_reduce_uid_cmd = on_regex(r'^扣款uid\s*(\d+)\s+(\d+)$', priority=5, block=True)
+admin_reduce_uid_cmd = on_command("扣款uid", priority=5, block=True)
 
 @admin_reduce_uid_cmd.handle()
-async def handle_admin_reduce_uid(event: Event, bot: Bot, uid: int = Depends(get_uid), groups: tuple = RegexGroup()):
+async def handle_admin_reduce_uid(event: Event, bot: Bot, uid: int = Depends(get_uid), args: Message = CommandArg()):
     """管理员通过UID扣款"""
     
     if uid not in superusers:
         await admin_reduce_uid_cmd.finish('权限不足', at_sender=True)
     
-    if not groups or len(groups) < 2:
+    parts = args.extract_plain_text().strip().split()
+    if len(parts) < 2:
         await admin_reduce_uid_cmd.finish("格式：扣款uid [目标uid] [金额]", at_sender=True)
     
-    target_uid = int(groups[0])
-    amount = int(groups[1])
+    try:
+        target_uid = int(parts[0])
+        amount = int(parts[1])
+    except ValueError:
+        await admin_reduce_uid_cmd.finish("UID和金额必须是数字！", at_sender=True)
     
     target_gold = money.get_user_money(target_uid, 'gold')
     if target_gold is None:
@@ -1209,20 +1244,24 @@ async def handle_admin_reduce_uid(event: Event, bot: Bot, uid: int = Depends(get
 
 
 # 扣款qq [目标QQ号] [金额]
-admin_reduce_qq_cmd = on_regex(r'^扣款qq\s*(\d+)\s+(\d+)$', priority=5, block=True)
+admin_reduce_qq_cmd = on_command("扣款qq", priority=5, block=True)
 
 @admin_reduce_qq_cmd.handle()
-async def handle_admin_reduce_qq(event: Event, bot: Bot, uid: int = Depends(get_uid), groups: tuple = RegexGroup()):
+async def handle_admin_reduce_qq(event: Event, bot: Bot, uid: int = Depends(get_uid), args: Message = CommandArg()):
     """管理员通过QQ号扣款"""
     
     if uid not in superusers:
         await admin_reduce_qq_cmd.finish('权限不足', at_sender=True)
     
-    if not groups or len(groups) < 2:
+    parts = args.extract_plain_text().strip().split()
+    if len(parts) < 2:
         await admin_reduce_qq_cmd.finish("格式：扣款qq [目标QQ号] [金额]", at_sender=True)
     
-    target_qq = groups[0]
-    amount = int(groups[1])
+    target_qq = parts[0]
+    try:
+        amount = int(parts[1])
+    except ValueError:
+        await admin_reduce_qq_cmd.finish("金额必须是数字！", at_sender=True)
     
     # QQ号转UID
     target_uid = uid_manager.get_uid_by_external_id("onebot", target_qq)

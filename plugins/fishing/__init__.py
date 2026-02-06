@@ -374,7 +374,7 @@ async def handle_sell(
     await FishingManager.save_user_info(uid, user_info)
 
     await sell_cmd.finish(
-        f"成功出售{num}条{fish}，得到{get_golds}枚金币~", at_sender=True
+        f"\n成功出售{num}条{fish}，得到{get_golds}枚金币~", at_sender=True
     )
 
 
