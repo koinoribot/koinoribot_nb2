@@ -264,3 +264,25 @@ def get_uid_count() -> int:
     
     conn.close()
     return row['count']
+
+
+def is_uid_exists(uid: int) -> bool:
+    """
+    检查 UID 是否存在
+    
+    Args:
+        uid: 用户 UID
+    
+    Returns:
+        True 如果存在，否则 False
+    """
+    _ensure_initialized()
+    conn = _get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT 1 FROM user_uid_mapping WHERE uid = ?', (uid,))
+    result = cursor.fetchone()
+    
+    conn.close()
+    return result is not None
+

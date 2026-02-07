@@ -1084,6 +1084,10 @@ async def handle_transfer_uid(event: Event, bot: Bot, uid: int = Depends(get_uid
     except ValueError:
         await transfer_uid_cmd.finish("UID和金额必须是数字！", at_sender=True)
     
+    # 检查UID是否存在
+    if not uid_manager.is_uid_exists(target_uid):
+        await transfer_uid_cmd.finish(f"找不到 UID:{target_uid} 对应的账户", at_sender=True)
+    
     await _do_transfer(transfer_uid_cmd, uid, target_uid, amount)
 
 
@@ -1179,6 +1183,9 @@ async def handle_admin_add_uid(event: Event, bot: Bot, uid: int = Depends(get_ui
     except ValueError:
         await admin_add_uid_cmd.finish("UID和金额必须是数字！", at_sender=True)
     
+    if not uid_manager.is_uid_exists(target_uid):
+        await admin_add_uid_cmd.finish(f"找不到 UID:{target_uid} 对应的账户", at_sender=True)
+    
     money.increase_user_money(target_uid, 'gold', amount)
     await admin_add_uid_cmd.finish(f'已向 UID:{target_uid} 打款 {amount} 金币', at_sender=True)
 
@@ -1233,6 +1240,9 @@ async def handle_admin_reduce_uid(event: Event, bot: Bot, uid: int = Depends(get
         amount = int(parts[1])
     except ValueError:
         await admin_reduce_uid_cmd.finish("UID和金额必须是数字！", at_sender=True)
+    
+    if not uid_manager.is_uid_exists(target_uid):
+        await admin_reduce_uid_cmd.finish(f"找不到 UID:{target_uid} 对应的账户", at_sender=True)
     
     target_gold = money.get_user_money(target_uid, 'gold')
     if target_gold is None:

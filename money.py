@@ -165,6 +165,7 @@ def get_user_money(uid: int, *keys: str) -> Optional[Union[int, tuple]]:
         if key not in KEYWORD_LIST:
             return None
 
+    conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
@@ -177,8 +178,6 @@ def get_user_money(uid: int, *keys: str) -> Optional[Union[int, tuple]]:
         cursor.execute(f"SELECT {columns} FROM user_money WHERE uid = ?", (uid,))
         result = cursor.fetchone()
 
-        conn.close()
-
         if result is None:
             return None
 
@@ -190,6 +189,9 @@ def get_user_money(uid: int, *keys: str) -> Optional[Union[int, tuple]]:
     except Exception as e:
         logger.error(f"[money] 获取用户数据失败: {e}")
         return None
+    finally:
+        if conn:
+            conn.close()
 
 
 def set_user_money(uid: int, key: str, value: int) -> int:
@@ -209,6 +211,7 @@ def set_user_money(uid: int, key: str, value: int) -> int:
     if key not in KEYWORD_LIST:
         return 0
 
+    conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
@@ -217,11 +220,13 @@ def set_user_money(uid: int, key: str, value: int) -> int:
         cursor.execute(f"UPDATE user_money SET {key} = ? WHERE uid = ?", (value, uid))
 
         conn.commit()
-        conn.close()
         return 1
     except Exception as e:
         logger.error(f"[money] 设置用户数据失败: {e}")
         return 0
+    finally:
+        if conn:
+            conn.close()
 
 
 def increase_user_money(uid: int, key: str, value: int) -> int:
@@ -241,6 +246,7 @@ def increase_user_money(uid: int, key: str, value: int) -> int:
     if key not in KEYWORD_LIST:
         return 0
 
+    conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
@@ -251,11 +257,13 @@ def increase_user_money(uid: int, key: str, value: int) -> int:
         )
 
         conn.commit()
-        conn.close()
         return 1
     except Exception as e:
         logger.error(f"[money] 增加用户资产失败: {e}")
         return 0
+    finally:
+        if conn:
+            conn.close()
 
 
 def reduce_user_money(uid: int, key: str, value: int) -> int:
@@ -275,6 +283,7 @@ def reduce_user_money(uid: int, key: str, value: int) -> int:
     if key not in KEYWORD_LIST:
         return 0
 
+    conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
@@ -282,7 +291,6 @@ def reduce_user_money(uid: int, key: str, value: int) -> int:
         created = _ensure_user_exists(cursor, uid)
         if created:
             conn.commit()
-            conn.close()
             return 0  # 新用户无法扣款
 
         cursor.execute(
@@ -290,11 +298,13 @@ def reduce_user_money(uid: int, key: str, value: int) -> int:
         )
 
         conn.commit()
-        conn.close()
         return 1
     except Exception as e:
         logger.error(f"[money] 减少用户资产失败: {e}")
         return 0
+    finally:
+        if conn:
+            conn.close()
 
 
 def increase_all_user_money(key: str, value: int) -> int:
@@ -304,6 +314,7 @@ def increase_all_user_money(key: str, value: int) -> int:
     if key not in KEYWORD_LIST:
         return 0
 
+    conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
@@ -311,11 +322,13 @@ def increase_all_user_money(key: str, value: int) -> int:
         cursor.execute(f"UPDATE user_money SET {key} = {key} + ?", (value,))
 
         conn.commit()
-        conn.close()
         return 1
     except Exception as e:
         logger.error(f"[money] 增加所有用户资产失败: {e}")
         return 0
+    finally:
+        if conn:
+            conn.close()
 
 
 def get_all_user_money(key: str) -> dict[int, int]:
@@ -330,24 +343,28 @@ def get_all_user_money(key: str) -> dict[int, int]:
     if key not in KEYWORD_LIST:
         return {}
 
+    conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
 
         cursor.execute(f"SELECT uid, {key} FROM user_money")
         results = cursor.fetchall()
-
-        conn.close()
+        
         return {row["uid"]: row[key] for row in results}
     except Exception as e:
         logger.error(f"[money] 获取所有用户资产失败: {e}")
         return {}
+    finally:
+        if conn:
+            conn.close()
 
 
 def delete_user_account(uid: int) -> int:
     """删除用户账户"""
     _ensure_initialized()
 
+    conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
@@ -356,11 +373,13 @@ def delete_user_account(uid: int) -> int:
         affected = cursor.rowcount
 
         conn.commit()
-        conn.close()
         return 1 if affected > 0 else 0
     except Exception as e:
         logger.error(f"[money] 删除用户账户失败: {e}")
         return 0
+    finally:
+        if conn:
+            conn.close()
 
 
 def tran_kira(uid: int, key: str, num: int) -> tuple[int, int]:
@@ -539,6 +558,7 @@ def get_user_wallet(uid: int) -> UserWallet:
     # 一次io读取出所有用户数据，性能损失相较于get_user_wallet()函数来说很小，并且更方便使用
     _ensure_initialized()
 
+    conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
@@ -551,7 +571,6 @@ def get_user_wallet(uid: int) -> UserWallet:
         if created:
             logger.debug("用户不存在，正在创建用户数据...")
             conn.commit()
-            conn.close()
             logger.debug("用户数据创建成功")
             logger.debug("获取用户数据成功")
             return UserWallet(uid)
@@ -562,7 +581,6 @@ def get_user_wallet(uid: int) -> UserWallet:
         result = cursor.fetchone()
         # 由上下文可知，不存在None的数据，因此我们使用0来代替None
         result = tuple(int(v) if v is not None else 0 for v in result)
-        conn.close()
 
         gold, luckygold, starstone, kirastone = result
         logger.debug(
@@ -573,6 +591,9 @@ def get_user_wallet(uid: int) -> UserWallet:
     except Exception as e:  # noqa: BLE001
         logger.error(f"[money] 获取用户数据失败: {e}")
         return UserWallet(uid)
+    finally:
+        if conn:
+            conn.close()
 
 
 def set_user_wallet(uid: int, wallet: UserWallet) -> None:
@@ -585,6 +606,7 @@ def set_user_wallet(uid: int, wallet: UserWallet) -> None:
     """
     _ensure_initialized()
 
+    conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
@@ -598,13 +620,15 @@ def set_user_wallet(uid: int, wallet: UserWallet) -> None:
             (wallet.gold, wallet.luckygold, wallet.starstone, wallet.kirastone, uid),
         )
         conn.commit()
-        conn.close()
         logger.debug(
             f"设置用户数据成功\nuid:{uid}: \ngold:{wallet.gold}, \nluckygold:{wallet.luckygold}, \nstarstone:{wallet.starstone}, \nkirastone:{wallet.kirastone}"  # noqa: E501
         )
 
     except Exception as e:  # noqa: BLE001
         logger.error(f"[money] 设置用户数据失败: {e}")
+    finally:
+        if conn:
+            conn.close()
 
 
 def wallet_manager(uid: int = Depends(get_uid)) -> Generator[UserWallet, None, None]:
