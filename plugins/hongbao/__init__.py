@@ -18,7 +18,7 @@ from nonebot.params import CommandArg, Depends
 from ... import money
 from ...utils import FreqLimiter, get_double_mean_money
 from ...tools import get_uid, get_group_id_optional, get_sender_nickname
-
+from ...su_manager import check_su_permission, record_su_usage
 __plugin_meta__ = PluginMetadata(
     name="hongbao",
     description="红包功能",
@@ -131,6 +131,11 @@ async def handle_fa_hongbao(
     if amount <= num_packets:
         await fa_hongbao.finish("金额太少啦，每份红包至少要1金币")
     
+    # SU 红包金额限制
+    allowed, reason = check_su_permission(uid, 'hongbao', amount=amount)
+    if not allowed:
+        await fa_hongbao.finish(reason)
+    
     # 检查用户金币
     user_gold = money.get_user_money(uid, 'gold') or 0
     if amount > user_gold:
@@ -138,6 +143,7 @@ async def handle_fa_hongbao(
     
     # 扣除金币
     money.reduce_user_money(uid, 'gold', amount)
+    record_su_usage(uid, 'hongbao', amount)
     
     # 创建红包
     packets = get_double_mean_money(amount, num_packets)

@@ -47,8 +47,8 @@ from .stock_utils import (
 from ... import uid_manager
 # 宠物相关
 from ..chongwu.pet import get_user_pet, add_user_item
-#su
-superusers = getattr(config, 'superusers', [])
+# SU 权限管理
+from ...su_manager import is_su, get_su_level, get_all_su_uids, check_su_permission, record_su_usage
 __plugin_meta__ = PluginMetadata(
     name="chaogu",
     description="股票市场系统 - 完整版（含幸运游戏、转盘、低保）",
@@ -624,7 +624,7 @@ async def perform_gamble_round(uid: int) -> dict:
     # 计算胜率
     get_gamble_win_probability(old_gold, uid)
     win_probability = gambling_sessions[uid]['win']
-    if uid in superusers:
+    if is_su(uid):
         win_probability += 0.5
     
     win = random.random() < win_probability
@@ -678,7 +678,7 @@ async def handle_start_gamble(event: Event, bot: Bot, uid: int = Depends(get_uid
     
     # 检查每日限制
     
-    if not await check_daily_gamble_limit(uid) and uid not in superusers:
+    if not await check_daily_gamble_limit(uid) and not is_su(uid):
         await gamble_start_cmd.finish("你今天已经赌过了，明天再来吧！人生的大起大落可经不起天天折腾哦。", at_sender=True)
     
     # 获取当前金币
@@ -859,9 +859,10 @@ async def handle_gamble_ranking(event: Event, bot: Bot):
     all_records = await get_all_gamble_record()
     
     
+    su_uids = get_all_su_uids()
     user_net_gains = []
     for uid, records in all_records.items():
-        if uid not in superusers:
+        if uid not in su_uids:
             net_gain = records['increase_record'] - records['reduce_record']
             if net_gain > 0:
                 user_net_gains.append((uid, net_gain))
@@ -888,9 +889,10 @@ async def handle_gamble_loss_ranking(event: Event, bot: Bot):
     all_records = await get_all_gamble_record()
     
     
+    su_uids = get_all_su_uids()
     user_contributions = []
     for uid, records in all_records.items():
-        if uid not in superusers:
+        if uid not in su_uids:
             net_contribution = records['reduce_record'] - records['increase_record']
             if net_contribution > 0:
                 user_contributions.append((uid, net_contribution))
@@ -998,7 +1000,7 @@ async def handle_turntable(event: Event, bot: Bot, uid: int = Depends(get_uid)):
     # 检查每日次数
     
     can_spin, remaining = await check_turntable_limit(uid)
-    if not can_spin and uid not in superusers:
+    if not can_spin and not is_su(uid):
         await turntable_cmd.finish(f"您今天的 {MAX_TURNS_PER_DAY} 次机会已经用完啦，明天再来吧！", at_sender=True)
     
     # 检查幸运币
@@ -1121,6 +1123,11 @@ async def _do_transfer(cmd, sender_uid: int, target_uid: int, amount: int):
     if sender_uid in blackusers:
         await cmd.finish('\n操作失败，账户被冻结，请联系管理员寻求帮助。', at_sender=True)
     
+    # SU 转账金额限制
+    allowed, reason = check_su_permission(sender_uid, 'transfer', amount=amount)
+    if not allowed:
+        await cmd.finish(f'\n{reason}', at_sender=True)
+    
     if sender_uid == target_uid:
         await cmd.finish('\n无法给自己转账', at_sender=True)
     
@@ -1158,6 +1165,7 @@ async def _do_transfer(cmd, sender_uid: int, target_uid: int, amount: int):
         money.increase_user_money(sender_uid, 'gold', total_amount)
         await cmd.finish('转账失败，已退还金币', at_sender=True)
     
+    record_su_usage(sender_uid, 'transfer', amount)
     await cmd.finish(f'\n转账成功，已向 UID:{target_uid} 转账 {amount} 金币，手续费 {fee} 金币\n你当前还剩 {restgold} 金币', at_sender=True)
 
 
@@ -1170,7 +1178,7 @@ admin_add_uid_cmd = on_command("打款uid", priority=5, block=True)
 async def handle_admin_add_uid(event: Event, bot: Bot, uid: int = Depends(get_uid), args: Message = CommandArg()):
     """管理员通过UID打款"""
     
-    if uid not in superusers:
+    if not is_su(uid):
         await admin_add_uid_cmd.finish('权限不足', at_sender=True)
     
     parts = args.extract_plain_text().strip().split()
@@ -1186,6 +1194,11 @@ async def handle_admin_add_uid(event: Event, bot: Bot, uid: int = Depends(get_ui
     if not uid_manager.is_uid_exists(target_uid):
         await admin_add_uid_cmd.finish(f"找不到 UID:{target_uid} 对应的账户", at_sender=True)
     
+    # SU 打款权限检查
+    allowed, reason = check_su_permission(uid, 'payment', target_uid=target_uid, amount=amount)
+    if not allowed:
+        await admin_add_uid_cmd.finish(f'\n{reason}', at_sender=True)
+    
     money.increase_user_money(target_uid, 'gold', amount)
     await admin_add_uid_cmd.finish(f'已向 UID:{target_uid} 打款 {amount} 金币', at_sender=True)
 
@@ -1197,7 +1210,7 @@ admin_add_qq_cmd = on_command("打款qq", priority=5, block=True)
 async def handle_admin_add_qq(event: Event, bot: Bot, uid: int = Depends(get_uid), args: Message = CommandArg()):
     """管理员通过QQ号打款"""
     
-    if uid not in superusers:
+    if not is_su(uid):
         await admin_add_qq_cmd.finish('权限不足', at_sender=True)
     
     parts = args.extract_plain_text().strip().split()
@@ -1215,6 +1228,11 @@ async def handle_admin_add_qq(event: Event, bot: Bot, uid: int = Depends(get_uid
     if target_uid is None:
         await admin_add_qq_cmd.finish(f"找不到QQ号 {target_qq} 对应的账户", at_sender=True)
     
+    # SU 打款权限检查
+    allowed, reason = check_su_permission(uid, 'payment', target_uid=target_uid, amount=amount)
+    if not allowed:
+        await admin_add_qq_cmd.finish(f'\n{reason}', at_sender=True)
+    
     money.increase_user_money(target_uid, 'gold', amount)
     await admin_add_qq_cmd.finish(f'已向 QQ:{target_qq} (UID:{target_uid}) 打款 {amount} 金币', at_sender=True)
 
@@ -1228,7 +1246,7 @@ admin_reduce_uid_cmd = on_command("扣款uid", priority=5, block=True)
 async def handle_admin_reduce_uid(event: Event, bot: Bot, uid: int = Depends(get_uid), args: Message = CommandArg()):
     """管理员通过UID扣款"""
     
-    if uid not in superusers:
+    if not is_su(uid):
         await admin_reduce_uid_cmd.finish('权限不足', at_sender=True)
     
     parts = args.extract_plain_text().strip().split()
@@ -1260,7 +1278,7 @@ admin_reduce_qq_cmd = on_command("扣款qq", priority=5, block=True)
 async def handle_admin_reduce_qq(event: Event, bot: Bot, uid: int = Depends(get_uid), args: Message = CommandArg()):
     """管理员通过QQ号扣款"""
     
-    if uid not in superusers:
+    if not is_su(uid):
         await admin_reduce_qq_cmd.finish('权限不足', at_sender=True)
     
     parts = args.extract_plain_text().strip().split()

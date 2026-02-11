@@ -978,6 +978,123 @@ async def handle_eternal_oath(event: Event, bot: Bot, uid: int = Depends(get_uid
     await oath_cmd.finish(msg, at_sender=True)
 
 
+# ===== 宠物排行榜 =====
+pet_ranking_cmd = on_command("宠物排行榜", priority=5, block=True)
+
+@pet_ranking_cmd.handle()
+async def handle_pet_ranking(event: Event, bot: Bot):
+    """显示成长值最高的前10只成年体宠物"""
+    from ...su_manager import get_all_su_uids
+    su_uids = get_all_su_uids()
+    
+    user_pets = await get_user_pets()
+
+    adult_pets = []
+    for uid_key, pet in user_pets.items():
+        # 过滤 SU 用户
+        try:
+            if int(uid_key) in su_uids:
+                continue
+        except (ValueError, TypeError):
+            if uid_key in su_uids:
+                continue
+        if pet.get("stage") != 2:
+            continue
+        temp_pet = dict(pet)
+        temp_pet = await update_pet_status(temp_pet)
+        if not temp_pet.get("runaway", False):
+            adult_pets.append((
+                temp_pet["growth"],
+                temp_pet["name"],
+                temp_pet["type"],
+                uid_key
+            ))
+
+    if not adult_pets:
+        await pet_ranking_cmd.finish("目前还没有成年体宠物上榜哦！", at_sender=True)
+
+    adult_pets.sort(reverse=True)
+
+    msg = ["🏆 宠物排行榜-TOP10 🏆"]
+    for rank, (growth, name, pet_type, _uid) in enumerate(adult_pets[:10], 1):
+        msg.append(f"第{rank}名: {name}({pet_type}) \n成长值: {growth:.1f}")
+
+    await pet_ranking_cmd.finish("\n".join(msg), at_sender=True)
+
+
+# ===== 宠物排名 =====
+pet_my_ranking_cmd = on_command("宠物排名", priority=5, block=True)
+
+@pet_my_ranking_cmd.handle()
+async def handle_my_pet_ranking(event: Event, bot: Bot, uid: int = Depends(get_uid)):
+    """查看自己宠物的排名"""
+    pet = await get_user_pet(uid)
+    if not pet or pet.get("temp_data"):
+        await pet_my_ranking_cmd.finish("你还没有宠物！", at_sender=True)
+
+    pet = await update_pet_status(pet)
+    await update_user_pet(uid, pet)
+
+    if pet.get("runaway", False):
+        await pet_my_ranking_cmd.finish(
+            f"你的宠物【{pet['name']}】离家出走了，无法参与排行", at_sender=True)
+
+    if pet.get("stage") != 2:
+        await pet_my_ranking_cmd.finish("只有成年体宠物可以查看排名哦！", at_sender=True)
+
+    user_pets = await get_user_pets()
+    from ...su_manager import get_all_su_uids
+    su_uids = get_all_su_uids()
+    
+    valid_pets = []
+    for uid_key, p in user_pets.items():
+        # 过滤 SU 用户
+        try:
+            if int(uid_key) in su_uids:
+                continue
+        except (ValueError, TypeError):
+            if uid_key in su_uids:
+                continue
+        if p.get("stage") != 2:
+            continue
+        temp_pet = dict(p)
+        temp_pet = await update_pet_status(temp_pet)
+        if not temp_pet.get("runaway", False):
+            valid_pets.append((
+                temp_pet["growth"],
+                uid_key,
+                temp_pet.get("name", "未知宠物")
+            ))
+
+    if not valid_pets:
+        await pet_my_ranking_cmd.finish("目前还没有有效的成年体宠物上榜哦！", at_sender=True)
+
+    valid_pets.sort(reverse=True, key=lambda x: x[0])
+
+    # 计算排名（处理并列情况）
+    rankings = {}
+    current_rank = 1
+    prev_growth = None
+    for idx, (growth, uid_key, name) in enumerate(valid_pets):
+        if growth != prev_growth:
+            current_rank = idx + 1
+        rankings[uid_key] = (current_rank, growth)
+        prev_growth = growth
+
+    my_rank_info = rankings.get(uid) or rankings.get(str(uid))
+    if my_rank_info is None:
+        await pet_my_ranking_cmd.finish("你的宠物未上榜！", at_sender=True)
+    else:
+        my_rank, my_growth = my_rank_info
+        total_pets = len(valid_pets)
+        await pet_my_ranking_cmd.finish(
+            f"\n你的宠物【{pet['name']}】"
+            f"\n当前排名: 第{my_rank}名（共{total_pets}只成年宠物）"
+            f"\n成长值: {my_growth:.1f}",
+            at_sender=True
+        )
+
+
 # ===== 技能帮助 =====
 skill_help_cmd = on_command("技能帮助", priority=5, block=True)
 

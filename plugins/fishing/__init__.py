@@ -28,8 +28,8 @@ from .serif import COOL_TIME_SERIF, GET_FISH_SERIF, NO_FISH_SERIF
 
 # 导入重构后的模块
 from .util import CooldownManager, DatabaseManager
-# su
-superusers = getattr(config, 'superusers', [])
+# SU 权限管理
+from ...su_manager import is_su
 __plugin_meta__ = PluginMetadata(
     name="fishing",
     description="钓鱼系统 - 完整版",
@@ -273,7 +273,7 @@ async def handle_thousand_fish(
     uid: int = Depends(get_uid),
     wallet: UserWallet = Depends(wallet_manager),
 ) -> None:
-    if uid not in superusers:
+    if not is_su(uid):
         await thousand_fish_cmd.finish("权限不足", at_sender=True)  
     await FishingManager.multi_fishing(
         uid,

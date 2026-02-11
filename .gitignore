@@ -42,3 +42,6 @@ src/fonts/*.woff2
 
 # Database
 *.db
+
+# SU
+plugins/su_register/

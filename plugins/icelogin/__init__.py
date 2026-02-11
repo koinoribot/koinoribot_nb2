@@ -99,13 +99,18 @@ async def handle_gold_ranking(
     uid: int = Depends(get_uid)
 ):
     """处理金币排行榜命令"""
+    from ...su_manager import get_all_su_uids
+    
     all_gold_data = money.get_all_user_money('gold')
     
     if not all_gold_data:
         await rank_cmd.finish("排行榜暂无数据。")
     
-    # 转换为列表并排序
-    ranked_list = [(uid_key, gold) for uid_key, gold in all_gold_data.items()]
+    # 过滤 SU 用户
+    su_uids = get_all_su_uids()
+    
+    # 转换为列表并排序（排除 SU）
+    ranked_list = [(uid_key, gold) for uid_key, gold in all_gold_data.items() if uid_key not in su_uids]
     ranked_list.sort(key=lambda x: x[1], reverse=True)
     
     if not ranked_list:
