@@ -85,7 +85,7 @@ class KoinoribotConfig(BaseModel):
     freeze_sc: int = 950
     
     # 超级用户
-    superusers: list = [10001, 10002]
+    superusers: list = [10002, 10001]
 
     # 黑名单用户
     blackusers: list = []
