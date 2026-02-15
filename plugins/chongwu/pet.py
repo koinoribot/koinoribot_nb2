@@ -281,6 +281,8 @@ async def update_pet_status(pet: dict) -> dict:
     # 成长值增加
     growth_rate = pet.get("growth_rate", 1.0)
     pet["growth"] = min(pet["growth_required"], pet.get("growth", 0) + time_passed / 3600 * growth_rate)
+    if pet["happiness"] < 1:
+        pet["runaway"] = True  # 标记为离家出走状态
     
     return pet
 
