@@ -182,12 +182,16 @@ ten_fish_cmd = on_command("十连钓鱼", priority=5, block=True)
 @ten_fish_cmd.handle()
 async def handle_ten_fish(
     matcher: Matcher,
+    bot: Bot,
+    event: Event,
     uid: int = Depends(get_uid),
     wallet: UserWallet = Depends(wallet_manager),
 ) -> None:
     await FishingManager.multi_fishing(
         uid,
         matcher,
+        bot,
+        event,
         10,
         95,
         config.star_price * 10 // 2,
@@ -204,12 +208,16 @@ hundred_fish_cmd = on_command("百连钓鱼", priority=5, block=True)
 @hundred_fish_cmd.handle()
 async def handle_hundred_fish(
     matcher: Matcher,
+    bot: Bot,
+    event: Event,
     uid: int = Depends(get_uid),
     wallet: UserWallet = Depends(wallet_manager),
 ) -> None:
     await FishingManager.multi_fishing(
         uid,
         matcher,
+        bot,
+        event,
         100,
         900,
         config.star_price * 100 // 2,
@@ -226,12 +234,16 @@ thousand_fish_cmd = on_command("千连钓鱼", priority=5, block=True)
 @thousand_fish_cmd.handle()
 async def handle_thousand_fish(
     matcher: Matcher,
+    bot: Bot,
+    event: Event,
     uid: int = Depends(get_uid),
     wallet: UserWallet = Depends(wallet_manager),
 ) -> None:
     await FishingManager.multi_fishing(
         uid,
         matcher,
+        bot,
+        event,
         1000,
         9000,
         config.star_price * 1000 // 2,
@@ -248,12 +260,16 @@ thousand_fish_cmd = on_command("万连钓鱼", priority=5, block=True)
 @thousand_fish_cmd.handle()
 async def handle_thousand_fish(
     matcher: Matcher,
+    bot: Bot,
+    event: Event,
     uid: int = Depends(get_uid),
     wallet: UserWallet = Depends(wallet_manager),
 ) -> None:
     await FishingManager.multi_fishing(
         uid,
         matcher,
+        bot,
+        event,
         10000,
         90000,
         config.star_price * 10000 // 2,
@@ -270,6 +286,8 @@ thousand_fish_cmd = on_command("十万连钓鱼", priority=5, block=True)
 @thousand_fish_cmd.handle()
 async def handle_thousand_fish(
     matcher: Matcher,
+    bot: Bot,
+    event: Event,
     uid: int = Depends(get_uid),
     wallet: UserWallet = Depends(wallet_manager),
 ) -> None:
@@ -278,6 +296,8 @@ async def handle_thousand_fish(
     await FishingManager.multi_fishing(
         uid,
         matcher,
+        bot,
+        event,
         100000,
         1,
         config.star_price * 0 // 2,

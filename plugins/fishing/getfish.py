@@ -10,12 +10,13 @@ import asyncio
 from typing import Dict, Optional
 
 from nonebot import logger
+from nonebot.adapters import Bot, Event
 from nonebot.matcher import Matcher
 from nonebot.params import Depends
 from ...money import UserWallet
 
 from ... import money
-from ...tools import get_uid
+from ...tools import get_uid, send_group_forward_msg, build_forward_chain
 from ...koinori_config import config
 from .util import DatabaseManager
 from .serif import GET_FISH_SERIF, NO_FISH_SERIF, COOL_TIME_SERIF
@@ -220,7 +221,8 @@ class FishingManager:
         return total_value
 
     @classmethod
-    async def multi_fishing(cls, uid:int, matcher: Matcher,times: int, cost: int, star_cost: int, command_name: str, 
+    async def multi_fishing(cls, uid:int, matcher: Matcher, bot: Bot, event: Event,
+                           times: int, cost: int, star_cost: int, command_name: str, 
                            cooldown_manager, user_wallet: UserWallet):
         """
         多连钓鱼核心逻辑
@@ -228,6 +230,8 @@ class FishingManager:
         Args:
             uid: 统一用户ID
             matcher: 事件实例
+            bot: Bot 对象（用于发送合并转发消息）
+            event: Event 对象（用于发送合并转发消息）
             times: 钓鱼次数
             cost: 鱼饵消耗
             star_cost: 星星消耗
@@ -297,23 +301,27 @@ class FishingManager:
         # 计算价值
         value = cls.cal_all_fish_value(result_summary)
 
-        # 构建消息
+        # ===== 构建钓鱼结果消息（放入合并转发） =====
         summary_message = f"🎣 {command_name}结果：\n"
+        summary_message += f"发送 概率公示 可查活动和概率\n"
         if auto_buy:
-            summary_message += f"(已自动购买{cost}个鱼饵)\n"
+            summary_message += f"(已自动购买{cost}个鱼饵~)\n"
 
         if result_summary:
             summary_message += "\n".join(f"{fish}: {count}条" for fish, count in result_summary.items())
         else:
             summary_message += "什么都没钓到..."
 
-        summary_message += f"\n\n总价值：{value}金币"
-        summary_message += f"\n总花费：{actual_cost}金币"
+        summary_message += f"\n总价值：{value}金币"
 
         # 活动补贴
         if not have_star and config.extra_gold == 1 and times == 100:
             user_wallet.gold += 300
-            summary_message += " +300(补贴)"
+            summary_message += f"+300金币(活动补贴)"
+
+        summary_message += f"\n总花费：{actual_cost}金币"
+        if config.star_price != 0:
+            summary_message += f" {star_cost}星星"
 
         # 幸运币奖励
         if actual_cost > 0:
@@ -328,10 +336,45 @@ class FishingManager:
                 user_wallet.gold += 1
                 summary_message += "\n幸运币+1"
 
-        # 添加今日次数提示
+        # ===== 构建次数统计消息（放入合并转发） =====
+        count_message = ""
         if not is_su(uid):
             fish_count, limit_count = DatabaseManager.get_user_fish_count_today(uid)
             rest_count = limit_count - fish_count
-            summary_message += f"\n\n今日已钓鱼：{fish_count}次\n剩余次数：{rest_count}次"
+            count_message = f"今日已钓鱼：{fish_count}次\n剩余次数：{rest_count}次"
 
-        await matcher.finish(summary_message, at_sender=True)
+        # ===== 构建价值汇总消息（单独发送） =====
+        value_message = f"总价值：{value}金币"
+        if not have_star and config.extra_gold == 1 and times == 100:
+            actual_value = value + 300
+            value_message = f"总价值：{actual_value}金币"
+        value_message += f"\n总花费：{actual_cost}金币"
+        if config.star_price != 0:
+            value_message += f" {star_cost}星星"
+        if actual_cost > 0:
+            ratio = value / actual_cost
+            if ratio > 3:
+                value_message += " 幸运币+3"
+            elif ratio > 2.5:
+                value_message += " 幸运币+2"
+            elif ratio > 2:
+                value_message += " 幸运币+1"
+
+        # ===== 发送合并转发消息（钓鱼结果 + 次数统计） =====
+        forward_msgs = [summary_message]
+        if count_message:
+            forward_msgs.append(count_message)
+
+        try:
+            chain = await build_forward_chain(bot, forward_msgs)
+            await send_group_forward_msg(event, bot, chain)
+        except Exception as e:
+            logger.error(f"发送合并转发消息失败: {e}，降级为普通消息")
+            await matcher.send(summary_message)
+            if count_message:
+                await matcher.send(count_message)
+
+        # ===== 单独发送价值汇总 =====
+        import asyncio
+        await asyncio.sleep(0.5)
+        await matcher.finish(value_message, at_sender=True)

@@ -207,3 +207,26 @@ async def handle_remove_bg(
     await remove_bg_cmd.finish("已恢复默认背景~", at_sender=True)
 
 
+# ===== 查看UID =====
+view_uid_cmd = on_command("查看uid", aliases={"我的uid", "个人信息"}, priority=5, block=True)
+
+@view_uid_cmd.handle()
+async def handle_view_uid(
+    event: Event,
+    bot: Bot,
+    uid: int = Depends(get_uid)
+):
+    """处理查看UID命令"""
+    from ...uid_manager import get_external_ids
+
+    external_ids = get_external_ids(uid)
+    qq_display = external_ids["onebot_id"] if external_ids["onebot_id"] else "未绑定"
+    openid_display = external_ids["qqbot_id"] if external_ids["qqbot_id"] else "未绑定"
+
+    msg = (
+        f"您的uid：{uid}\n"
+        f"--qq：{qq_display}\n"
+        f"--openid：{openid_display}"
+    )
+
+    await view_uid_cmd.finish(msg, at_sender=True)
