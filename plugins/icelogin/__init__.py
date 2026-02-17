@@ -224,7 +224,7 @@ async def handle_view_uid(
     openid_display = external_ids["qqbot_id"] if external_ids["qqbot_id"] else "未绑定"
 
     msg = (
-        f"您的uid：{uid}\n"
+        f"\n您的uid：{uid}\n"
         f"--qq：{qq_display}\n"
         f"--openid：{openid_display}"
     )
