@@ -32,6 +32,8 @@ from .pet import (
     get_user_items, add_user_item, use_user_item,
     get_pet_data, get_status_description, update_pet_status, check_pet_evolution
 )
+from ...su_manager import is_su
+from ..fishing.util import DatabaseManager
 
 __plugin_meta__ = PluginMetadata(
     name="chongwu",
@@ -673,75 +675,97 @@ pet_event_cmd = on_command("宠物事件", priority=5, block=True)
 
 @pet_event_cmd.handle()
 async def handle_pet_event(event: Event, bot: Bot, uid: int = Depends(get_uid)):
+
     now_date = datetime.now().date()
-    
+
     pet = await get_user_pet(uid)
     if not pet or pet.get("temp_data"):
         await pet_event_cmd.finish("你还没有宠物！", at_sender=True)
-    
+
+    # 先更新一次宠物状态，处理自然衰减等
     pet = await update_pet_status(pet)
+
     if pet.get("runaway"):
-        await pet_event_cmd.finish(f"你的宠物【{pet['name']}】离家出走了！", at_sender=True)
-    
-    last_event = pet.get("last_event_date")
-    if last_event:
+        await pet_event_cmd.finish(f"你的宠物【{pet['name']}】离家出走了，无法触发事件！", at_sender=True)
+
+    # 初始化最后事件日期
+    last_event_date = None
+    pet_last_event = pet.get("last_event_date")
+    if pet_last_event:
         try:
-            if isinstance(last_event, str):
-                last_date = datetime.strptime(last_event, "%Y-%m-%d").date()
-            else:
-                last_date = datetime.fromtimestamp(last_event).date()
-            if last_date == now_date:
-                await pet_event_cmd.finish("今天已触发过宠物事件了，明天再来！", at_sender=True)
-        except:
-            pass
-    
+            if isinstance(pet_last_event, (int, float)):
+                last_event_date = datetime.fromtimestamp(pet_last_event).date()
+            elif isinstance(pet_last_event, str):
+                last_event_date = datetime.strptime(pet_last_event, "%Y-%m-%d").date()
+        except (TypeError, ValueError):
+            last_event_date = None
+
+    # 检查是否已经执行过今日事件（超级用户绕过）
+    if last_event_date and last_event_date == now_date and not is_su(uid):
+        await pet_event_cmd.finish("今天已经触发过宠物事件了，请明天再来！", at_sender=True)
+
     if not pet.get("skills"):
-        await pet_event_cmd.finish(f"{pet['name']}还没学会任何技能！", at_sender=True)
-    
+        await pet_event_cmd.finish(f"{pet['name']}还没有学会任何技能！", at_sender=True)
+
     results = []
+    # 在这里集中处理技能效果
     for skill_name in pet["skills"]:
         try:
             if skill_name == "宝石爱好者":
                 amount = random.randint(1, 20)
                 money.increase_user_money(uid, 'kirastone', amount)
-                results.append(f"💎 捡回了{amount}枚宝石")
+                results.append(f"\n{pet['name']}外出玩耍时偶遇无人看守的宝石矿井，偷偷捡回了{amount}枚宝石。")
             elif skill_name == "盼望长大":
-                pet['growth'] = min(pet.get('growth_required', math.inf), pet['growth'] + 10)
-                results.append("📈 成长值+10")
+                growth_gain = 10
+                pet['growth'] = min(pet.get('growth_required', math.inf), pet['growth'] + growth_gain)
+                results.append(f"\n{pet['name']}很喜欢你，决定要努力长大来报答你，成长值+{growth_gain}。")
             elif skill_name == "金币爱好者":
                 amount = random.randint(1000, 20000)
                 money.increase_user_money(uid, 'gold', amount)
-                results.append(f"💰 捡回了{amount}金币")
+                results.append(f"\n{pet['name']}外出玩耍时捡到了一个钱包，里面有{amount}金币。")
             elif skill_name == "幸运星":
                 amount = random.randint(5, 7)
                 money.increase_user_money(uid, 'luckygold', amount)
-                results.append(f"🍀 幸运币+{amount}")
+                results.append(f"\n{pet['name']}外出玩耍时偶遇音祈，由于可爱的外表，深受对方喜爱，获得了上帝的祝福。幸运币+{amount}。")
             elif skill_name == "卖萌":
                 amount = random.randint(100, 2000)
                 money.increase_user_money(uid, 'starstone', amount)
-                results.append(f"⭐ 星星+{amount}")
+                results.append(f"\n{pet['name']}外出玩耍时偶遇梦灵，由于太可爱了，被大小姐rua了个爽，并收获了大量好感度（星星+{amount}）。")
             elif skill_name == "美食家":
-                food = random.choice(["普通料理", "高级料理", "豪华料理", "能量饮料"])
-                await add_user_item(uid, food)
-                results.append(f"🍱 获得{food}")
+                food_item = random.choice(["普通料理", "高级料理", "豪华料理", "能量饮料"])
+                await add_user_item(uid, food_item, 1)
+                results.append(f"\n{pet['name']}外出玩耍时偶遇商店的抽奖活动，赢得了{food_item}。")
             elif skill_name == "自我管理":
                 enum = random.randint(10, 80)
                 hnum = random.randint(10, 80)
                 pet["energy"] = min(pet["max_energy"], pet["energy"] + enum)
                 pet["happiness"] = min(pet["max_happiness"], pet["happiness"] + hnum)
-                results.append(f"💪 精力+{enum} 好感+{hnum}")
+                results.append(f"\n{pet['name']}已经习惯了你早出晚归的生活，她知道你赚金币养她很不容易。通过自我情绪管理，她恢复{enum}精力和{hnum}好感。")
             elif skill_name == "捕鱼达人":
-                buff = 2 if "猫" in pet["type"] else 1
-                add_count = random.randint(1, 5) * 100 * (3 ** pet["stage"]) * buff
-                results.append(f"🎣 钓鱼次数+{add_count}")
+                is_cat = "猫" in pet["type"]
+                buff = 2 if is_cat else 1
+                stage = pet["stage"]
+                add_count = random.randint(1, 5) * 100 * (3 ** stage) * buff
+                DatabaseManager.check_and_update_fish_limit(uid, add_count * -1)
+                results.append(f"\n{pet['name']}在捕鱼大赛中名列前茅，赢得了鱼塘的特邀入场券。今日钓鱼次数+{add_count}。")
+            else:
+                results.append(f"【{skill_name}】是未知技能，无法发动。")
+
         except Exception as e:
-            results.append(f"【{skill_name}】发动失败")
-    
+            results.append(f"【{skill_name}】发动时发生错误：{str(e)}")
+
+    # 在所有技能执行完毕后，保存宠物状态和本次事件的日期
     pet["last_event_date"] = now_date.strftime("%Y-%m-%d")
     await update_user_pet(uid, pet)
-    
-    msg = f"🐾 {pet['name']}今天的事件：\n" + "\n".join(results)
-    await pet_event_cmd.finish(msg, at_sender=True)
+
+    # 发送事件结果（合并转发）
+    msg = f"{pet['name']}今天发生了以下事件：" + "\n".join(results)
+    try:
+        chain = await build_forward_chain(bot, [msg])
+        await send_group_forward_msg(event, bot, chain)
+    except Exception as e:
+        logger.error(f"宠物事件合并消息发送失败: {e}")
+        await pet_event_cmd.finish(msg, at_sender=True)
 
 
 # ===== 宠物进化 =====
@@ -1118,6 +1142,38 @@ pet_skill = f"""幼年体/成长体/成年体可学习1/3/5个技能
 async def handle_skill_help(event: Event, bot: Bot):
     chain = await build_forward_chain(bot, [pet_skill])
     await send_group_forward_msg(event, bot, chain)
+
+
+# ===== 查看进化分支 =====
+luxian_cmd = on_command("查看进化分支", aliases={"查看进化路线"}, priority=5, block=True)
+
+@luxian_cmd.handle()
+async def handle_luxian_help(event: Event, bot: Bot):
+    from pathlib import Path
+    from ...resources import get
+
+    # 加载进化路线图片
+    luxian1_img = get('chongwu/luxian/luxian1.png')
+    luxian2_img = get('chongwu/luxian/luxian2.png')
+
+    # 构建 6 个消息节点，严格对应 old_bot
+    pet_luxian1 = "幼年体→→成长体（三选一）："
+    pet_luxian2 = [{"type": "image", "data": {"file": f"base64://{luxian1_img.base64}"}}]
+    pet_luxian3 = "成长体→→成年体（固定路线）："
+    pet_luxian4 = [{"type": "image", "data": {"file": f"base64://{luxian2_img.base64}"}}]
+    pet_luxian5 = "宠物处于『成长体』时，可使用 重置进化路线 来切换进化分支（需消耗1个时之泪）"
+    pet_luxian6 = "当前版本中，同一幼年体的不同的进化分支仅影响种族名称，没有数值差异"
+
+    msgs = [pet_luxian1, pet_luxian2, pet_luxian3, pet_luxian4, pet_luxian5, pet_luxian6]
+
+    try:
+        chain = await build_forward_chain(bot, msgs)
+        await send_group_forward_msg(event, bot, chain)
+    except Exception as e:
+        logger.error(f"进化分支帮助合并消息发送失败: {e}")
+        await luxian_cmd.finish("幼年体→→成长体（三选一），成长体→→成年体（固定路线）\n"
+                                "宠物处于『成长体』时，可使用 重置进化路线 来切换进化分支（需消耗1个时之泪）\n"
+                                "当前版本中，同一幼年体的不同的进化分支仅影响种族名称，没有数值差异")
 
 
 # ===== 初始化 =====

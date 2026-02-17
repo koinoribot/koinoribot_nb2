@@ -120,7 +120,7 @@ async def send_group_forward_msg(
 
 async def build_forward_node(
     bot: Bot,
-    msg: str,
+    msg,
     user_id: int = 0
 ) -> Dict[str, Any]:
     """
@@ -128,7 +128,7 @@ async def build_forward_node(
     
     Args:
         bot: Bot 对象
-        msg: 消息内容
+        msg: 消息内容（str 或消息段列表）
         user_id: 发送者 ID（0 表示使用 bot 自身）
     
     Returns:
@@ -146,12 +146,18 @@ async def build_forward_node(
     if not user_name.strip():
         user_name = '用户'
     
+    # 如果 msg 已经是列表（消息段格式），直接使用；否则包装为 text 消息段
+    if isinstance(msg, list):
+        content = msg
+    else:
+        content = [{"type": "text", "data": {"text": str(msg)}}]
+    
     return {
         "type": "node",
         "data": {
             "name": user_name,
             "user_id": str(user_id),
-            "content": [{"type": "text", "data": {"text": str(msg)}}]
+            "content": content
         }
     }
 
