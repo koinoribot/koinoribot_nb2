@@ -668,25 +668,29 @@ async def gold_change_record(uid: int, start_gold: int, final_gold: int) -> str:
 
 
 # ===== 幸运游戏 =====
-gamble_start_cmd = on_command("幸运游戏", priority=5, block=True)
+gamble_start_old_cmd = on_command("一场豪赌", priority=5, block=True)
+@gamble_start_old_cmd.handle()
+async def handle_start_gamble_old(event: Event, bot: Bot, uid: int = Depends(get_uid)):
+    await gamble_start_old_cmd.finish("\n由于不可抗力，本功能已更名为 幸运游戏", at_sender=True)
 
+gamble_start_cmd = on_command("幸运游戏", priority=5, block=True)
 @gamble_start_cmd.handle()
 async def handle_start_gamble(event: Event, bot: Bot, uid: int = Depends(get_uid)):
     # 检查是否已在赌局中
     if uid in gambling_sessions and gambling_sessions[uid].get('active', False):
-        await gamble_start_cmd.finish("你正在进行幸运游戏，请先完成或使用 '见好就收' 结束当前赌局。", at_sender=True)
+        await gamble_start_cmd.finish("\n你正在进行幸运游戏，请先完成或使用 '见好就收' 结束当前赌局。", at_sender=True)
     
     # 检查每日限制
     
     if not await check_daily_gamble_limit(uid) and not is_su(uid):
-        await gamble_start_cmd.finish("你今天已经赌过了，明天再来吧！人生的大起大落可经不起天天折腾哦。", at_sender=True)
+        await gamble_start_cmd.finish("\n你今天已经赌过了，明天再来吧！人生的大起大落可经不起天天折腾哦。", at_sender=True)
     
     # 获取当前金币
     gold = money.get_user_money(uid, 'gold') or 0
     luckygold = money.get_user_money(uid, 'luckygold') or 0
     
     if gold <= 0:
-        await gamble_start_cmd.finish("欠债/失信用户，禁止游戏。", at_sender=True)
+        await gamble_start_cmd.finish("\n欠债/失信用户，禁止游戏。", at_sender=True)
     
     # 初始化会话状态
     gambling_sessions[uid] = {
@@ -871,7 +875,7 @@ async def handle_gamble_ranking(event: Event, bot: Bot):
     
     msg = "梦灵的零花钱都给了谁：\n"
     for i, (uid, net_gain) in enumerate(sorted_users[:10], 1):
-        msg += f"第{i}名: {uid} 累计取走: {net_gain}金币\n"
+        msg += f"第{i}名: UID{uid} 累计取走: {net_gain}金币\n"
     
     if len(sorted_users) == 0:
         msg += "暂无零花钱记录"
@@ -901,7 +905,7 @@ async def handle_gamble_loss_ranking(event: Event, bot: Bot):
     
     msg = "梦灵的零花钱来源：\n"
     for i, (uid, net_contribution) in enumerate(sorted_users[:10], 1):
-        msg += f"第{i}名: {uid} 累计存入: {net_contribution}金币\n"
+        msg += f"第{i}名: UID{uid} 累计存入: {net_contribution}金币\n"
     
     if len(sorted_users) == 0:
         msg += "暂无零花钱记录"
