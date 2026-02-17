@@ -344,7 +344,7 @@ class FishingManager:
             count_message = f"今日已钓鱼：{fish_count}次\n剩余次数：{rest_count}次"
 
         # ===== 构建价值汇总消息（单独发送） =====
-        value_message = f"总价值：{value}金币"
+        value_message = f"\n总价值：{value}金币"
         if not have_star and config.extra_gold == 1 and times == 100:
             actual_value = value + 300
             value_message = f"总价值：{actual_value}金币"
