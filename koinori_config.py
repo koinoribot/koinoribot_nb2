@@ -65,7 +65,7 @@ class KoinoribotConfig(BaseModel):
     
     # ================== 经济系统 ==================
     min_rest: int = 1000                    # 转账后最少剩余金币
-    dibao: int = 1                          # 是否开启低保
+    dibao: int = 3000                          # 低保金额
     transfer_fee: float = 0.1               # 转账手续费比率
     stone_fee: float = 0.05                 # 退还宝石手续费比率
     return_item_fee: float = 0.5            # 退还宠物用品手续费比率
