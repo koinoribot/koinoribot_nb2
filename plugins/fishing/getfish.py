@@ -366,7 +366,7 @@ class FishingManager:
             forward_msgs.append(count_message)
 
         try:
-            chain = await build_forward_chain(bot, forward_msgs)
+            chain = await build_forward_chain(bot, [forward_msgs])
             await send_group_forward_msg(event, bot, chain)
         except Exception as e:
             logger.error(f"发送合并转发消息失败: {e}，降级为普通消息")
