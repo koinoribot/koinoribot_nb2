@@ -375,7 +375,7 @@ async def handle_shop(event: Event, bot: Bot):
         item_list.append(f"• {name} - {price}宝石 ({effect})")
     
     msg = "🏪 宠物商店\n━━━━━━━━━━\n" + "\n".join(item_list)
-    msg += "\n\n使用: 购买 物品名 [数量]"
+    msg += "\n\n使用: 购买 物品名 数量"
     
     try:
         chain = await build_forward_chain(bot, [msg])
