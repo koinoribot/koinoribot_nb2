@@ -17,3 +17,5 @@ pydantic>=2.0.0
 kaleido==0.2.1
 narwhals==1.35.0
 filetype==1.2.0
+mathparse~=0.2.7
+aiofiles~=25.1.0
