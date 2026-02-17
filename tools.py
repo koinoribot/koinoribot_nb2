@@ -146,20 +146,12 @@ async def build_forward_node(
     if not user_name.strip():
         user_name = '用户'
     
-    # NapCat 要求 content 为消息段数组格式，不能直接传字符串
-    if isinstance(msg, str):
-        content = [{"type": "text", "data": {"text": msg}}]
-    elif isinstance(msg, list):
-        content = msg
-    else:
-        content = [{"type": "text", "data": {"text": str(msg)}}]
-    
     return {
         "type": "node",
         "data": {
             "name": user_name,
             "user_id": str(user_id),
-            "content": content
+            "content": [{"type": "text", "data": {"text": str(msg)}}]
         }
     }
 
