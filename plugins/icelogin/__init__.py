@@ -365,7 +365,7 @@ async def handle_bind(
         "current_external_id": current_external_id,
     }
 
-    await bind_cmd.reject(
+    await bind_cmd.send(
         f"\n绑定将把你当前平台的账号与验证码对应的账号合并为同一个uid。\n"
         f"你需要选择保留哪个uid，未被保留的uid将被删除。\n\n"
         f"1. 老账号 uid={source_uid}（QQ: {source_qq}, OpenID: {source_openid}）\n"
@@ -374,6 +374,7 @@ async def handle_bind(
         f"   金币余额: {current_gold}  宝石余额: {current_gem}\n\n"
         f"请回复 1（保留老账号）或 2（保留新账号）："
     )
+    await bind_cmd.pause()
 
 
 @bind_cmd.handle()
@@ -448,10 +449,11 @@ async def handle_unbind(
     if not external_ids["onebot_id"] or not external_ids["qqbot_id"]:
         await unbind_cmd.finish("你当前只绑定了一个平台，无需解绑~", at_sender=True)
 
-    await unbind_cmd.reject(
+    await unbind_cmd.send(
         f"\n解绑后，你在当前平台将获得一个全新的uid，原uid={uid}的数据保留在原账号中。\n"
         f"此操作不可撤销！请回复「确认」继续，或回复其他内容取消："
     )
+    await unbind_cmd.pause()
 
 
 @unbind_cmd.handle()
