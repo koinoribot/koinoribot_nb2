@@ -246,3 +246,230 @@ async def handle_view_uid(
     )
 
     await view_uid_cmd.finish(msg, at_sender=True)
+
+
+# ===== 注册验证码（仅私聊） =====
+register_code_cmd = on_command("注册验证码", aliases={"注册绑定验证码"}, priority=5, block=True)
+
+
+@register_code_cmd.handle()
+async def handle_register_code(
+    event: Event,
+    bot: Bot,
+    uid: int = Depends(get_uid)
+):
+    """生成绑定验证码（仅私聊触发）"""
+    # 检查是否为私聊
+    from ...tools import is_onebot, is_qqbot
+    import nonebot.adapters.onebot.v11 as onebot_adapter
+
+    is_private = False
+    if is_onebot(event) and isinstance(event, onebot_adapter.PrivateMessageEvent):
+        is_private = True
+    # QQBot 暂不支持私聊场景，如需支持可在此扩展
+
+    if not is_private:
+        await register_code_cmd.finish("该命令仅支持私聊使用哦~", at_sender=True)
+
+    # 检查是否已双平台绑定
+    from ...uid_manager import get_external_ids
+    external_ids = get_external_ids(uid)
+    if external_ids["onebot_id"] and external_ids["qqbot_id"]:
+        await register_code_cmd.finish("你已绑定了两个平台，无需再次绑定~", at_sender=True)
+
+    from ...uid_manager import generate_bind_code
+    code = generate_bind_code(uid)
+    await register_code_cmd.finish(
+        f"你的绑定码：{code}\n请在5分钟内于另一个平台发送「绑定账号 {code}」完成绑定。"
+    )
+
+
+# ===== 绑定账号 =====
+bind_cmd = on_command("绑定账号", priority=5, block=True)
+
+# 临时存储绑定上下文: {当前用户uid: {"source_uid": int, "current_uid": int, "current_platform": str, "current_external_id": str}}
+_bind_context: dict[int, dict] = {}
+
+
+@bind_cmd.handle()
+async def handle_bind(
+    event: Event,
+    bot: Bot,
+    uid: int = Depends(get_uid)
+):
+    """处理绑定账号命令"""
+    from ...tools import is_onebot, is_qqbot
+    from ...uid_manager import (
+        verify_bind_code, get_external_ids, rebind_external_id,
+        delete_uid_mapping
+    )
+
+    # 提取参数（验证码）
+    raw_msg = event.get_plaintext().strip()
+    parts = raw_msg.split()
+    # parts[0] 是命令本身 "绑定账号"，parts[1] 应该是验证码
+    if len(parts) < 2:
+        await bind_cmd.finish("请输入验证码，格式：绑定账号 <验证码>", at_sender=True)
+
+    code = parts[1].strip()
+
+    # 校验验证码
+    source_uid = verify_bind_code(code)
+    if source_uid is None:
+        await bind_cmd.finish("验证码无效或已过期，请重新获取~", at_sender=True)
+
+    # 判断当前用户平台
+    if is_onebot(event):
+        current_platform = "onebot"
+    elif is_qqbot(event):
+        current_platform = "qqbot"
+    else:
+        await bind_cmd.finish("不支持的平台类型", at_sender=True)
+        return
+
+    current_external_id = event.get_user_id()
+
+    # 检查源uid与当前uid的平台情况
+    source_ids = get_external_ids(source_uid)
+    current_ids = get_external_ids(uid)
+
+    # 不能绑定到自己
+    if source_uid == uid:
+        await bind_cmd.finish("验证码对应的就是你当前的账号，无需绑定~", at_sender=True)
+
+    # 检查源uid对应的平台槽位
+    source_platform_col = "onebot_id" if current_platform == "onebot" else "qqbot_id"
+    if source_ids.get(source_platform_col):
+        await bind_cmd.finish(
+            f"验证码对应的uid={source_uid}已绑定了{current_platform}平台的账号，不能重复绑定同一平台~",
+            at_sender=True
+        )
+
+    # 如果当前用户没有独立uid的另一平台数据，直接绑定
+    # （即当前uid只有当前平台的ID，没有其他平台的ID）
+    other_platform_col = "qqbot_id" if current_platform == "onebot" else "onebot_id"
+    if not current_ids.get(other_platform_col):
+        # 当前uid只有单平台，直接rebind到source_uid，删除当前uid
+        rebind_external_id(source_uid, current_platform, current_external_id)
+        if uid != source_uid:
+            delete_uid_mapping(uid)
+        await bind_cmd.finish(
+            f"绑定成功！你的uid为 {source_uid}",
+            at_sender=True
+        )
+    else:
+        # 两个uid都有数据，需要用户选择保留哪个
+        _bind_context[uid] = {
+            "source_uid": source_uid,
+            "current_uid": uid,
+            "current_platform": current_platform,
+            "current_external_id": current_external_id,
+        }
+        source_qq = source_ids.get("onebot_id", "无")
+        source_openid = source_ids.get("qqbot_id", "无")
+        current_qq = current_ids.get("onebot_id", "无")
+        current_openid = current_ids.get("qqbot_id", "无")
+
+        # 获取两个uid的资产信息
+        source_gold = money.get_user_money(source_uid, 'gold') or 0
+        source_gem = money.get_user_money(source_uid, 'kirastone') or 0
+        current_gold = money.get_user_money(uid, 'gold') or 0
+        current_gem = money.get_user_money(uid, 'kirastone') or 0
+
+        await bind_cmd.reject(
+            f"\n检测到两个账号：\n"
+            f"1. uid={source_uid}（QQ: {source_qq}, OpenID: {source_openid}）\n"
+            f"   金币余额: {source_gold}  宝石余额: {source_gem}\n"
+            f"\n2. uid={uid}（QQ: {current_qq}, OpenID: {current_openid}）\n"
+            f"   金币余额: {current_gold}  宝石余额: {current_gem}\n"
+            f"请回复 1 或 2 选择保留哪个uid（未保留的uid将被删除）："
+        )
+
+
+@bind_cmd.handle()
+async def handle_bind_choice(
+    event: Event,
+    bot: Bot,
+    uid: int = Depends(get_uid)
+):
+    """处理用户选择保留哪个uid"""
+    from ...uid_manager import rebind_external_id, delete_uid_mapping
+
+    if uid not in _bind_context:
+        await bind_cmd.finish("没有待处理的绑定请求~", at_sender=True)
+
+    ctx = _bind_context.pop(uid)
+    choice = event.get_plaintext().strip()
+
+    source_uid = ctx["source_uid"]
+    current_uid = ctx["current_uid"]
+    current_platform = ctx["current_platform"]
+    current_external_id = ctx["current_external_id"]
+
+    if choice == "1":
+        # 保留 source_uid，删除 current_uid
+        rebind_external_id(source_uid, current_platform, current_external_id)
+        delete_uid_mapping(current_uid)
+        await bind_cmd.finish(f"绑定成功！保留uid={source_uid}，uid={current_uid}已删除。", at_sender=True)
+    elif choice == "2":
+        # 保留 current_uid，把 source 的另一平台ID移过来，删除 source_uid
+        source_other_platform = "qqbot" if current_platform == "onebot" else "onebot"
+        from ...uid_manager import get_external_ids
+        source_ids = get_external_ids(source_uid)
+        source_other_col = "onebot_id" if source_other_platform == "onebot" else "qqbot_id"
+        source_other_id = source_ids.get(source_other_col)
+        if source_other_id:
+            rebind_external_id(current_uid, source_other_platform, source_other_id)
+        delete_uid_mapping(source_uid)
+        await bind_cmd.finish(f"绑定成功！保留uid={current_uid}，uid={source_uid}已删除。", at_sender=True)
+    else:
+        # 无效选择，放弃
+        await bind_cmd.finish("无效的选择，绑定已取消。", at_sender=True)
+
+
+# ===== 解绑账号 =====
+unbind_cmd = on_command("解绑账号", priority=5, block=True)
+
+
+@unbind_cmd.handle()
+async def handle_unbind(
+    event: Event,
+    bot: Bot,
+    uid: int = Depends(get_uid)
+):
+    """解绑当前平台账号"""
+    from ...tools import is_onebot, is_qqbot
+    from ...uid_manager import get_external_ids, get_uid as create_uid
+
+    external_ids = get_external_ids(uid)
+
+    if is_onebot(event):
+        platform = "onebot"
+        platform_col = "onebot_id"
+    elif is_qqbot(event):
+        platform = "qqbot"
+        platform_col = "qqbot_id"
+    else:
+        await unbind_cmd.finish("不支持的平台类型", at_sender=True)
+        return
+
+    # 检查是否已绑定了两个平台
+    if not external_ids["onebot_id"] or not external_ids["qqbot_id"]:
+        await unbind_cmd.finish("你当前只绑定了一个平台，无需解绑~", at_sender=True)
+
+    # 将当前平台ID从uid中移除
+    from ...uid_manager import bind_external_id, _get_connection
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute(f'UPDATE user_uid_mapping SET {platform_col} = NULL WHERE uid = ?', (uid,))
+    conn.commit()
+    conn.close()
+
+    # 为当前平台ID创建新的独立uid
+    external_id = event.get_user_id()
+    new_uid = create_uid(platform=platform, external_id=external_id)
+
+    await unbind_cmd.finish(
+        f"解绑成功！你在当前平台的新uid为 {new_uid}，原uid={uid}的数据保留在原账号中。",
+        at_sender=True
+    )

@@ -7,7 +7,9 @@ UID 统一管理模块
 - 预留手动绑定功能（后续实现）
 """
 
+import random
 import sqlite3
+import time
 from datetime import datetime
 from typing import Literal, Optional
 
@@ -285,4 +287,128 @@ def is_uid_exists(uid: int) -> bool:
     
     conn.close()
     return result is not None
+
+
+# ===== 绑定验证码系统 =====
+
+# 内存存储: {code: {"uid": int, "expire": float}}
+_bind_codes: dict[str, dict] = {}
+
+# 验证码有效期（秒）
+BIND_CODE_EXPIRE = 300  # 5分钟
+
+
+def _clean_expired_codes():
+    """清理过期验证码"""
+    now = time.time()
+    expired = [c for c, v in _bind_codes.items() if v["expire"] < now]
+    for c in expired:
+        del _bind_codes[c]
+
+
+def generate_bind_code(uid: int) -> str:
+    """
+    为指定 UID 生成6位绑定验证码
+
+    Args:
+        uid: 用户 UID
+
+    Returns:
+        6位数字验证码字符串
+    """
+    _clean_expired_codes()
+
+    # 移除该 uid 之前的未过期验证码
+    old_codes = [c for c, v in _bind_codes.items() if v["uid"] == uid]
+    for c in old_codes:
+        del _bind_codes[c]
+
+    code = str(random.randint(100000, 999999))
+    # 防止碰撞
+    while code in _bind_codes:
+        code = str(random.randint(100000, 999999))
+
+    _bind_codes[code] = {
+        "uid": uid,
+        "expire": time.time() + BIND_CODE_EXPIRE
+    }
+    return code
+
+
+def verify_bind_code(code: str) -> Optional[int]:
+    """
+    校验绑定验证码
+
+    Args:
+        code: 6位验证码
+
+    Returns:
+        源 UID（验证成功），None（验证码无效或过期）
+    """
+    _clean_expired_codes()
+
+    if code not in _bind_codes:
+        return None
+
+    uid = _bind_codes[code]["uid"]
+    del _bind_codes[code]
+    return uid
+
+
+def delete_uid_mapping(uid: int) -> bool:
+    """
+    删除 UID 映射行
+
+    Args:
+        uid: 要删除的 UID
+
+    Returns:
+        是否删除成功
+    """
+    _ensure_initialized()
+    conn = _get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('DELETE FROM user_uid_mapping WHERE uid = ?', (uid,))
+    affected = cursor.rowcount
+
+    conn.commit()
+    conn.close()
+    return affected > 0
+
+
+def rebind_external_id(target_uid: int, platform: Platform, external_id: str) -> bool:
+    """
+    将 external_id 绑定到 target_uid 的对应槽位。
+    如果 external_id 已绑定到其他 uid，先删除旧映射行。
+
+    Args:
+        target_uid: 目标 UID
+        platform: 平台 ("onebot" / "qqbot")
+        external_id: 外部 ID
+
+    Returns:
+        是否成功
+    """
+    _ensure_initialized()
+    conn = _get_connection()
+    cursor = conn.cursor()
+    column = "onebot_id" if platform == "onebot" else "qqbot_id"
+
+    try:
+        # 删除 external_id 的旧映射（如果存在）
+        cursor.execute(f'DELETE FROM user_uid_mapping WHERE {column} = ? AND uid != ?',
+                       (external_id, target_uid))
+
+        # 将 external_id 写入 target_uid 的槽位
+        cursor.execute(f'UPDATE user_uid_mapping SET {column} = ? WHERE uid = ?',
+                       (external_id, target_uid))
+
+        conn.commit()
+        return cursor.rowcount > 0
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
 
