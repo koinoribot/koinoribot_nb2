@@ -265,10 +265,12 @@ async def handle_register_code(
 ):
     """生成绑定验证码（仅私聊触发）"""
     # 检查是否为私聊
+    from nonebot.adapters.qq.event import C2CMessageCreateEvent
     is_private = False
     if is_onebot(event) and isinstance(event, onebot_adapter.PrivateMessageEvent):
         is_private = True
-    # QQBot 暂不支持私聊场景，如需支持可在此扩展
+    elif is_qqbot(event) and isinstance(event, C2CMessageCreateEvent):
+        is_private = True
 
     if not is_private:
         await register_code_cmd.finish("该命令仅支持私聊使用哦~", at_sender=True)

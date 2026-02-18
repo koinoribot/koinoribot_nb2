@@ -393,11 +393,11 @@ async def handle_my_portfolio(event: Event, bot: Bot, uid: int = Depends(get_uid
     user_portfolio = await get_user_portfolio(uid)
     
     if not user_portfolio:
-        await my_portfolio_cmd.finish("\n您的股仓是空的，快去买点股票吧！", at_sender=True)
+        await my_portfolio_cmd.finish("您的股仓是空的，快去买点股票吧！", at_sender=True)
     
     stock_data = await get_stock_data()
     
-    lines = ["\n您的股仓详情:"]
+    lines = ["您的股仓详情:"]
     total_value = 0.0
     
     for stock_name, amount in user_portfolio.items():
@@ -670,26 +670,26 @@ async def gold_change_record(uid: int, start_gold: int, final_gold: int) -> str:
 gamble_start_old_cmd = on_command("一场豪赌", priority=5, block=True)
 @gamble_start_old_cmd.handle()
 async def handle_start_gamble_old(event: Event, bot: Bot, uid: int = Depends(get_uid)):
-    await gamble_start_old_cmd.finish("\n由于不可抗力，本功能已更名为 幸运游戏", at_sender=True)
+    await gamble_start_old_cmd.finish("由于不可抗力，本功能已更名为 幸运游戏", at_sender=True)
 
 gamble_start_cmd = on_command("幸运游戏", priority=5, block=True)
 @gamble_start_cmd.handle()
 async def handle_start_gamble(event: Event, bot: Bot, uid: int = Depends(get_uid)):
     # 检查是否已在赌局中
     if uid in gambling_sessions and gambling_sessions[uid].get('active', False):
-        await gamble_start_cmd.finish("\n你正在进行幸运游戏，请先完成或使用 '见好就收' 结束当前赌局。", at_sender=True)
+        await gamble_start_cmd.finish("你正在进行幸运游戏，请先完成或使用 '见好就收' 结束当前赌局。", at_sender=True)
     
     # 检查每日限制
     
     if not await check_daily_gamble_limit(uid) and not is_su(uid):
-        await gamble_start_cmd.finish("\n你今天已经赌过了，明天再来吧！人生的大起大落可经不起天天折腾哦。", at_sender=True)
+        await gamble_start_cmd.finish("你今天已经赌过了，明天再来吧！人生的大起大落可经不起天天折腾哦。", at_sender=True)
     
     # 获取当前金币
     gold = money.get_user_money(uid, 'gold') or 0
     luckygold = money.get_user_money(uid, 'luckygold') or 0
     
     if gold <= 0:
-        await gamble_start_cmd.finish("\n欠债/失信用户，禁止游戏。", at_sender=True)
+        await gamble_start_cmd.finish("欠债/失信用户，禁止游戏。", at_sender=True)
     
     # 初始化会话状态
     gambling_sessions[uid] = {
@@ -731,12 +731,12 @@ async def handle_confirm_gamble(event: Event, bot: Bot, uid: int = Depends(get_u
     start_gold = gambling_sessions[uid]['start_gold']
     
     if gold != start_gold:
-        await gamble_confirm_cmd.finish(f"\n检测到钱包金币发生了改变: \n{start_gold}金币 → {gold}金币\n本次会话作废，请重新开局。", at_sender=True)
+        await gamble_confirm_cmd.finish(f"检测到钱包金币发生了改变: \n{start_gold}金币 → {gold}金币\n本次会话作废，请重新开局。", at_sender=True)
         del gambling_sessions[uid]
     
     if luckygold < 1:
         del gambling_sessions[uid]
-        await gamble_confirm_cmd.finish("\n你没有足够的幸运币参与豪赌。", at_sender=True)
+        await gamble_confirm_cmd.("你没有足够的幸运币参与豪赌。", at_sender=True)
     
     money.reduce_user_money(uid, 'luckygold', 1)
     
@@ -786,7 +786,7 @@ async def handle_continue_gamble(event: Event, bot: Bot, uid: int = Depends(get_
     luckygold = money.get_user_money(uid, 'luckygold') or 0
     
     if luckygold < 1:
-        await gamble_continue_cmd.finish("\n你没有足够的幸运币继续。发送 见好就收 可以退出赌局~", at_sender=True)
+        await gamble_continue_cmd.("你没有足够的幸运币继续。发送 见好就收 可以退出赌局~", at_sender=True)
     
     money.reduce_user_money(uid, 'luckygold', 1)
     
@@ -1020,7 +1020,7 @@ async def handle_turntable(event: Event, bot: Bot, uid: int = Depends(get_uid)):
     # 检查幸运币
     lucky_coins = money.get_user_money(uid, 'luckygold') or 0
     if lucky_coins < 1:
-        await turntable_cmd.finish("\n您的幸运币不足，无法启动转盘哦。", at_sender=True)
+        await turntable_cmd.("您的幸运币不足，无法启动转盘哦。", at_sender=True)
     
     money.reduce_user_money(uid, 'luckygold', 1)
     remaining_turns = await record_turntable_spin(uid)
@@ -1046,26 +1046,26 @@ async def handle_dibao(event: Event, bot: Bot, uid: int = Depends(get_uid)):
     """领取低保"""
     dibao_amount = getattr(config, 'dibao', 3000)
     if dibao_amount == 0:
-        await dibao_cmd.finish("\n低保功能维护中，请稍候再试。", at_sender=True)
+        await dibao_cmd.("低保功能维护中，请稍候再试。", at_sender=True)
     
     # 检查今天是否已领
     if not await check_daily_prek(uid):
-        await dibao_cmd.finish("\n你今天已经领过了，明天再来吧。", at_sender=True)
+        await dibao_cmd.("你今天已经领过了，明天再来吧。", at_sender=True)
     
     # 检查是否在赌博中
     if uid in gambling_sessions and gambling_sessions[uid].get('active', False):
-        await dibao_cmd.finish("\n赌徒不能领取低保哦~", at_sender=True)
+        await dibao_cmd.("赌徒不能领取低保哦~", at_sender=True)
     
     # 检查股票持仓
     user_portfolio = await get_user_portfolio(uid)
     if user_portfolio:
         stock_names = ", ".join(user_portfolio.keys())
-        await dibao_cmd.finish(f"\n检测到你偷偷藏了股票({stock_names})，这么富还想骗低保？", at_sender=True)
+        await dibao_cmd.finish(f"检测到你偷偷藏了股票({stock_names})，这么富还想骗低保？", at_sender=True)
     
     # 检查金币
     user_gold = money.get_user_money(uid, 'gold') or 0
     if user_gold > 4999:
-        await dibao_cmd.finish("\n这么富，还想骗低保？", at_sender=True)
+        await dibao_cmd.("这么富，还想骗低保？", at_sender=True)
     if user_gold < 0:
         await dibao_cmd.finish("欠债/失信用户，禁止操作。", at_sender=True)
     
@@ -1076,10 +1076,10 @@ async def handle_dibao(event: Event, bot: Bot, uid: int = Depends(get_uid)):
     pet = await get_user_pet(uid)
     if pet and not pet["runaway"]:
         money.increase_user_money(uid, 'gold', dibao_amount+3000)
-        await dibao_cmd.finish(f"\n已领取{dibao_amount+3000}金币（含宠物补贴）。\n你现在有{user_gold + dibao_amount+3000}金币", at_sender=True)
+        await dibao_cmd.finish(f"已领取{dibao_amount+3000}金币（含宠物补贴）。\n你现在有{user_gold + dibao_amount+3000}金币", at_sender=True)
     else:
         money.increase_user_money(uid, 'gold', dibao_amount)
-        await dibao_cmd.finish(f"\n已领取{dibao_amount}金币。\n你现在有{user_gold + dibao_amount}金币", at_sender=True)
+        await dibao_cmd.finish(f"已领取{dibao_amount}金币。\n你现在有{user_gold + dibao_amount}金币", at_sender=True)
 
 
 # ===== 转账功能 (uid/qq/at 三种模式) =====
@@ -1195,10 +1195,10 @@ async def _do_transfer(cmd, sender_uid: int, target_uid: int, amount: int):
         await cmd.finish('\n无法给自己转账', at_sender=True)
     
     if sender_uid in gambling_sessions and gambling_sessions[sender_uid].get('active', False):
-        await cmd.finish("\n你正处于豪赌过程中，不能转账哦~", at_sender=True)
+        await cmd.("你正处于豪赌过程中，不能转账哦~", at_sender=True)
     
     if target_uid in gambling_sessions and gambling_sessions[target_uid].get('active', False):
-        await cmd.finish("\n对方正处于豪赌过程中，不能转账哦~", at_sender=True)
+        await cmd.("对方正处于豪赌过程中，不能转账哦~", at_sender=True)
     
     if amount < 20:
         await cmd.finish('错误金额，最低转账20金币', at_sender=True)
