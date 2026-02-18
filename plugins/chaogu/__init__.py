@@ -1139,18 +1139,48 @@ transfer_at_cmd = on_command("转账", priority=5, block=True)
 @transfer_at_cmd.handle()
 async def handle_transfer_at(uid: int = Depends(get_uid), args: Message = CommandArg()):
     """通过at转账"""
+    target_uid = None
     try:
-        target_uid = get_at_uid(args[0])
-    except ValueError:
-        await transfer_at_cmd.finish("格式：转账 at [金额]", at_sender=True)
-    if target_uid is None:
-        await transfer_at_cmd.finish("找不到at对应的账户", at_sender=True)
-    try:
-        amount = int(args[1].data["text"])
-    except ValueError:
-        await transfer_at_cmd.finish("金额必须是数字！", at_sender=True)
-    await _do_transfer(transfer_at_cmd, uid, target_uid, amount)
+        if len(args) > 0:
+            target_uid = get_at_uid(args[0])
+    except (ValueError, IndexError, Exception):
+        pass
+    
+    # 如果通过at找到了uid，通过at逻辑处理
+    if target_uid is not None:
+        try:
+            # 尝试提取金额，兼容旧逻辑但也支持 extract_plain_text
+            text = args.extract_plain_text().strip()
+            if not text:
+                 # 如果 extract_plain_text 为空（例如只发了 At），尝试检查 args[1]
+                 if len(args) > 1 and args[1].type == "text":
+                     amount = int(args[1].data["text"].strip())
+                 else:
+                     raise ValueError
+            else:
+                 amount = int(text)
+        except (ValueError, IndexError):
+            await transfer_at_cmd.finish("金额必须是数字！", at_sender=True)
+        
+        await _do_transfer(transfer_at_cmd, uid, target_uid, amount)
+        return
 
+    # Fallback: 尝试 QQ 号逻辑
+    parts = args.extract_plain_text().strip().split()
+    if len(parts) >= 2:
+        target_qq = parts[0]
+        try:
+            amount = int(parts[1])
+        except ValueError:
+            await transfer_at_cmd.finish("金额必须是数字！", at_sender=True)
+        
+        target_uid = uid_manager.get_uid_by_external_id("onebot", target_qq)
+        if target_uid is None:
+            await transfer_at_cmd.finish(f"找不到at对应的账户，且找不到QQ号 {target_qq} 对应的账户", at_sender=True)
+            
+        await _do_transfer(transfer_at_cmd, uid, target_uid, amount)
+    else:
+        await transfer_at_cmd.finish("格式：转账 [at/QQ] [金额]", at_sender=True)
 
 async def _do_transfer(cmd, sender_uid: int, target_uid: int, amount: int):
     """执行转账逻辑"""
