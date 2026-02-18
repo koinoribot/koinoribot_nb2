@@ -309,7 +309,7 @@ async def _create_node_image(node: Dict[str, Any], width: int = 600, font_size: 
     
     # 初始高度，后续会裁剪
     temp_height = 5000 
-    img = BuildImage(width, temp_height, font_size=font_size, color=(255, 255, 255))
+    img = BuildImage(width, temp_height, font_size=font_size, color=(255, 255, 255), font="msyh.ttf")
     
     current_y = padding
     
