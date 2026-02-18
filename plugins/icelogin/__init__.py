@@ -5,6 +5,8 @@
 迁移自旧版 koinoribot
 """
 
+import base64
+
 from nonebot import on_command
 from nonebot.plugin import PluginMetadata
 from nonebot.adapters import Event, Bot
@@ -14,7 +16,7 @@ from nonebot import logger
 # 导入核心模块
 from ... import money
 from ...utils import FreqLimiter
-from ...tools import get_uid, get_sender_nickname, get_user_avatar_url
+from ...tools import get_uid, get_sender_nickname, get_user_avatar_url, is_qqbot
 
 __plugin_meta__ = PluginMetadata(
     name="icelogin",
@@ -53,13 +55,20 @@ async def handle_login(
     from .aslogin_v3 import as_login_v3
     # 获取用户头像 URL
     avatar_url = get_user_avatar_url(event)
-    image_msg = await as_login_v3(
+    image_bytes = await as_login_v3(
         uid=uid,
         username=username,
         qqname=username,
         nick_flag=1 if username else 0,
         avatar_url=avatar_url
     )
+    # 根据适配器类型构建图片消息段
+    if is_qqbot(event):
+        from nonebot.adapters.qq import MessageSegment as QQMsgSeg
+        image_msg = QQMsgSeg.file_image(image_bytes)
+    else:
+        from nonebot.adapters.onebot.v11 import MessageSegment as OBMsgSeg
+        image_msg = OBMsgSeg.image(f"base64://{base64.b64encode(image_bytes).decode()}")
     await login_cmd.send(image_msg)
 
     login_limiter.start_cd(uid)
@@ -82,7 +91,14 @@ async def handle_purse(
     from .aslogin_v3 import get_purse
     # 获取用户头像 URL
     avatar_url = get_user_avatar_url(event)
-    image_msg = await get_purse(uid=uid, user_name=username, avatar_url=avatar_url)
+    image_bytes = await get_purse(uid=uid, user_name=username, avatar_url=avatar_url)
+    # 根据适配器类型构建图片消息段
+    if is_qqbot(event):
+        from nonebot.adapters.qq import MessageSegment as QQMsgSeg
+        image_msg = QQMsgSeg.file_image(image_bytes)
+    else:
+        from nonebot.adapters.onebot.v11 import MessageSegment as OBMsgSeg
+        image_msg = OBMsgSeg.image(f"base64://{base64.b64encode(image_bytes).decode()}")
     await purse_cmd.send(image_msg)
 
     purse_limiter.start_cd(uid)

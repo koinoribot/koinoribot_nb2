@@ -160,13 +160,12 @@ def feed_back(value: int) -> str:
         return "999！！是隐藏的999运势！！！"
 
 
-def save_to_local(img: BuildImage, prefix: str):
-    """将图片转为 Base64 并返回 MessageSegment 用于 NoneBot2 发送"""
-    from nonebot.adapters.onebot.v11 import MessageSegment
-    
-    # 直接使用 base64 编码，无需保存到本地
-    base64_data = img.pic2bs4()
-    return MessageSegment.image(f"base64://{base64_data}")
+def save_to_local(img: BuildImage, prefix: str) -> bytes:
+    """将图片转为 bytes 返回，由调用方根据适配器类型构建消息段"""
+    from io import BytesIO
+    buf = BytesIO()
+    img.markImg.save(buf, format="PNG")
+    return buf.getvalue()
 
 
 async def as_login_v3(uid: int, username: str, qqname: str, nick_flag: int, avatar_url: str = ''):
