@@ -41,7 +41,7 @@ def get_group_id(event: Event) -> str:
     """获取群组 ID""" 
     if isinstance(event, onebot.GroupMessageEvent):
         return str(event.group_id)
-    if isinstance(event, qq.GroupMsgReceiveEvent):
+    if isinstance(event, qq.Event) and hasattr(event, 'group_openid') and event.group_openid:
         return event.group_openid
     raise ValueError(f"不支持的事件类型：{type(event)}")
 

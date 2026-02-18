@@ -451,7 +451,7 @@ async def handle_unbind(
 
     await unbind_cmd.send(
         f"\n解绑后，你在当前平台将获得一个全新的uid，原uid={uid}的数据保留在原账号中。\n"
-        f"此操作不可撤销！请回复「确认」继续，或回复其他内容取消："
+        f"此操作不可撤销！请回复 确认 继续，或回复其他内容取消："
     )
     await unbind_cmd.pause()
 
