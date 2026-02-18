@@ -24,7 +24,7 @@ from nonebot import logger
 
 from ... import money
 from ...koinori_config import config
-from ...tools import get_uid, send_group_forward_msg, build_forward_chain, get_at_uid
+from ...tools import get_uid, send_group_forward_msg, build_forward_chain, get_at_uid, build_image_msg
 from ..fishing.util import DatabaseManager as FishingDB
 
 from .stock_utils import (
@@ -204,11 +204,9 @@ async def handle_stock_trend(event: Event, bot: Bot, groups: tuple = RegexGroup(
         logger.info(f"股票走势: 图表生成完成，结果={chart_buf is not None}")
         
         if chart_buf:
-            # 转换为 Base64 并发送图片
-            from nonebot.adapters.onebot.v11 import MessageSegment
+            # 转换为图片消息段并发送
             image_bytes = chart_buf.getvalue()
-            b64_str = base64.b64encode(image_bytes).decode()
-            img_msg = MessageSegment.image(f"base64://{b64_str}")
+            img_msg = build_image_msg(event, image_bytes)
             logger.info(f"股票走势: 发送图片")
             await stock_trend_cmd.finish(img_msg)
         else:

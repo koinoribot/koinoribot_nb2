@@ -21,13 +21,11 @@ from nonebot.adapters import Event, Bot, Message
 from nonebot.plugin import PluginMetadata
 from nonebot.params import Depends, CommandArg
 from nonebot import logger
-from nonebot.adapters.onebot.v11 import MessageSegment
-
 from .guess_func import get_random_word, get_random_tango, kana_yomi_splt
 from .digit_guess_func import get_random_int
 from ...build_image import BuildImage
 from ...utils import load_data
-from ...tools import get_group_id
+from ...tools import get_group_id, build_image_msg
 
 __plugin_meta__ = PluginMetadata(
     name="english_guess",
@@ -183,7 +181,7 @@ async def handle_wordle(event: Event, bot: Bot, args: Message = CommandArg(), gi
     bg = draw_wordle_legend(bg)
     bg.save(str(temp_path / f'{gid}.png'))
     
-    img_msg = MessageSegment.image(f"base64://{bg.pic2bs4()}")
+    img_msg = build_image_msg(event, bg.pic2bs4())
     await wordle_cmd.finish(img_msg + f"\n请发送【我猜是 对应单词】进行猜测~当前为{level}词库\n限时{expire_time[word_len]}秒，发送【我要提示/我不猜了】可获取提示或退出", at_sender=True)
 
 
@@ -257,7 +255,7 @@ async def handle_digitle(event: Event, bot: Bot, args: Message = CommandArg(), g
     bg = draw_digit_legend(bg)
     bg.save(str(temp_path / f'{gid}.png'))
     
-    img_msg = MessageSegment.image(f"base64://{bg.pic2bs4()}")
+    img_msg = build_image_msg(event, bg.pic2bs4())
     await digitle_cmd.finish(img_msg + f"\n请发送【我猜是 对应数字】进行猜测~\n发送【我不猜了】可退出游戏", at_sender=True)
 
 
@@ -312,7 +310,7 @@ async def handle_tangole(event: Event, bot: Bot, args: Message = CommandArg(), g
     bg = BuildImage(0, 0, background=str(bg_path))
     bg.save(str(temp_path / f'{gid}.png'))
     
-    img_msg = MessageSegment.image(f"base64://{bg.pic2bs4()}")
+    img_msg = build_image_msg(event, bg.pic2bs4())
     await tangole_cmd.finish(
         img_msg + f"\n请发送【我猜是 对应假名】进行猜测~当前为{trans[level]}日语词库，词义为【{rand_tango['mean']}】\n限时5分钟，发送【我要提示/我不猜了】可获取提示或退出",
         at_sender=True
@@ -414,7 +412,7 @@ async def handle_english_guess(event: Event, bot: Bot, gid: str, session: Dict, 
         pic_path = temp_path / f'{gid}.png'
         if pic_path.exists():
             pic = BuildImage(0, 0, background=str(pic_path))
-            img_msg = MessageSegment.image(f"base64://{pic.pic2bs4()}")
+            img_msg = build_image_msg(event, pic.pic2bs4())
             await bot.send(event, img_msg + f"时间已过，正确答案是{word}，{pos}{trans}")
         else:
             await bot.send(event, f"时间已过，正确答案是{word}，{pos}{trans}")
@@ -456,20 +454,20 @@ async def handle_english_guess(event: Event, bot: Bot, gid: str, session: Dict, 
     
     if len(correct_pos) == length:
         # 猜对了
-        img_msg = MessageSegment.image(f"base64://{pic.pic2bs4()}")
+        img_msg = build_image_msg(event, pic.pic2bs4())
         await bot.send(event, img_msg + f'\n你猜出了这个单词！\n{word}\n{pos}{trans}', at_sender=True)
         close_session(gid)
     else:
         session['times'] += 1
         if session['times'] == session['total_times']:
             # 次数用完
-            img_msg = MessageSegment.image(f"base64://{pic.pic2bs4()}")
+            img_msg = build_image_msg(event, pic.pic2bs4())
             await bot.send(event, img_msg + f'\n次数用完了，没有人猜对...\n{word}\n{pos}{trans}', at_sender=True)
             close_session(gid)
         else:
             # 继续游戏
             pic.save(str(temp_path / f'{gid}.png'))
-            img_msg = MessageSegment.image(f"base64://{pic.pic2bs4()}")
+            img_msg = build_image_msg(event, pic.pic2bs4())
             await bot.send(event, img_msg)
 
 
@@ -486,7 +484,7 @@ async def handle_digit_guess(event: Event, bot: Bot, gid: str, session: Dict, me
         pic_path = temp_path / f'{gid}.png'
         if pic_path.exists():
             pic = BuildImage(0, 0, background=str(pic_path))
-            img_msg = MessageSegment.image(f"base64://{pic.pic2bs4()}")
+            img_msg = build_image_msg(event, pic.pic2bs4())
             await bot.send(event, img_msg + f'时间已过，正确答案是{answer}')
         else:
             await bot.send(event, f'时间已过，正确答案是{answer}')
@@ -532,18 +530,18 @@ async def handle_digit_guess(event: Event, bot: Bot, gid: str, session: Dict, me
         pic.paste(digit, (34 + i * gap - int(digit.w / 2), 32 + times * gap - int(digit.h / 2)), alpha=True)
     
     if len(correct_pos) == length:
-        img_msg = MessageSegment.image(f"base64://{pic.pic2bs4()}")
+        img_msg = build_image_msg(event, pic.pic2bs4())
         await bot.send(event, img_msg + f'\n你猜出了这个数字！\n它是{answer}', at_sender=True)
         close_session(gid)
     else:
         session['times'] += 1
         if session['times'] == session['total_times']:
-            img_msg = MessageSegment.image(f"base64://{pic.pic2bs4()}")
+            img_msg = build_image_msg(event, pic.pic2bs4())
             await bot.send(event, img_msg + f'\n次数用完了，没有人猜对...\n它是{answer}', at_sender=True)
             close_session(gid)
         else:
             pic.save(str(temp_path / f'{gid}.png'))
-            img_msg = MessageSegment.image(f"base64://{pic.pic2bs4()}")
+            img_msg = build_image_msg(event, pic.pic2bs4())
             await bot.send(event, img_msg)
 
 
@@ -563,7 +561,7 @@ async def handle_japanese_guess(event: Event, bot: Bot, gid: str, session: Dict,
         pic_path = temp_path / f'{gid}.png'
         if pic_path.exists():
             pic = BuildImage(0, 0, background=str(pic_path))
-            img_msg = MessageSegment.image(f"base64://{pic.pic2bs4()}")
+            img_msg = build_image_msg(event, pic.pic2bs4())
             await bot.send(event, img_msg + f'时间已过，正确答案是{kana}\n{yomi}{mean}\n{sample}')
         else:
             await bot.send(event, f'时间已过，正确答案是{kana}\n{yomi}{mean}\n{sample}')
@@ -595,16 +593,16 @@ async def handle_japanese_guess(event: Event, bot: Bot, gid: str, session: Dict,
         pic.paste(hinagara, (35 + i * gap - int(hinagara.w / 2), 33 + times * gap - int(hinagara.h / 2)), alpha=True)
     
     if len(correct_pos) == length:
-        img_msg = MessageSegment.image(f"base64://{pic.pic2bs4()}")
+        img_msg = build_image_msg(event, pic.pic2bs4())
         await bot.send(event, img_msg + f'\n你拼出了这个单词！\n{jpword}({kana})\n{yomi}{mean}{sample}', at_sender=True)
         close_session(gid)
     else:
         session['times'] += 1
         if session['times'] == session['total_times']:
-            img_msg = MessageSegment.image(f"base64://{pic.pic2bs4()}")
+            img_msg = build_image_msg(event, pic.pic2bs4())
             await bot.send(event, img_msg + f'\n次数用完了，没有人答对...\n\n{jpword}({kana})\n{yomi}{mean}{sample}', at_sender=True)
             close_session(gid)
         else:
             pic.save(str(temp_path / f'{gid}.png'))
-            img_msg = MessageSegment.image(f"base64://{pic.pic2bs4()}")
+            img_msg = build_image_msg(event, pic.pic2bs4())
             await bot.send(event, img_msg)

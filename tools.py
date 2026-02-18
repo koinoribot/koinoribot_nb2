@@ -4,7 +4,8 @@
 提供 NoneBot2 依赖注入兼容的工具函数，支持 OneBot V11 和 QQ-Bot 双协议。
 """
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
+import base64
 
 import nonebot.adapters.onebot.v11 as onebot
 from nonebot.adapters import Event, Bot
@@ -243,3 +244,32 @@ def get_at_uid(message_segment:onebot.MessageSegment | qq.MessageSegment) -> Opt
         uid = get_at_uid_qqbot(message_segment)
         uuid = get_uid_by_external_id(platform="qqbot", external_id=uid)
     return uuid
+
+
+# ===== 图片消息段构建 =====
+
+def build_image_msg(event: Event, image_data: Union[bytes, str]):
+    """
+    根据适配器类型构建图片消息段
+
+    Args:
+        event: 事件对象，用于判断适配器类型
+        image_data: 图片数据，可以是 bytes（原始图片）或 str（base64 编码字符串）
+
+    Returns:
+        对应适配器的图片消息段
+    """
+    if isinstance(image_data, str):
+        # base64 字符串，先解码为 bytes
+        image_bytes = base64.b64decode(image_data)
+        b64_str = image_data
+    else:
+        image_bytes = image_data
+        b64_str = base64.b64encode(image_bytes).decode()
+
+    if isinstance(event, qq.Event):
+        from nonebot.adapters.qq import MessageSegment as QQMsgSeg
+        return QQMsgSeg.file_image(image_bytes)
+    else:
+        from nonebot.adapters.onebot.v11 import MessageSegment as OBMsgSeg
+        return OBMsgSeg.image(f"base64://{b64_str}")
