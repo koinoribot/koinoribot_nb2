@@ -344,7 +344,7 @@ class FishingManager:
             count_message = f"今日已钓鱼：{fish_count}次\n剩余次数：{rest_count}次"
 
         # ===== 构建价值汇总消息（单独发送） =====
-        value_message = f"\n总价值：{value}金币"
+        value_message = f"总价值：{value}金币"
         if not have_star and config.extra_gold == 1 and times == 100:
             actual_value = value + 300
             value_message = f"总价值：{actual_value}金币"
@@ -366,8 +366,9 @@ class FishingManager:
             forward_msgs.append(count_message)
 
         try:
-            chain = await build_forward_chain(bot, forward_msgs)
-            await send_group_forward_msg(event, bot, chain)
+            #chain = await build_forward_chain(bot, forward_msgs)
+            #await send_group_forward_msg(event, bot, chain)
+            await matcher.send("\n\n".join(forward_msgs))
         except Exception as e:
             logger.error(f"发送合并转发消息失败: {e}，降级为普通消息")
             await matcher.send(summary_message)
@@ -375,6 +376,5 @@ class FishingManager:
                 await matcher.send(count_message)
 
         # ===== 单独发送价值汇总 =====
-        import asyncio
-        await asyncio.sleep(0.5)
-        await matcher.finish(value_message, at_sender=True)
+        #await asyncio.sleep(0.5)
+        #await matcher.finish(value_message, at_sender=True)
