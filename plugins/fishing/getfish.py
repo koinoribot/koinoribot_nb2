@@ -308,7 +308,7 @@ class FishingManager:
             summary_message += f"(已自动购买{cost}个鱼饵~)\n"
 
         if result_summary:
-            summary_message += "\n".join(f"{fish}: {count}条" for fish, count in result_summary.items())
+            summary_message += "".join(f"{fish}: {count}条" for fish, count in result_summary.items())
         else:
             summary_message += "什么都没钓到..."
 
