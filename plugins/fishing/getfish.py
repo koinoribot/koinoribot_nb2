@@ -324,16 +324,16 @@ class FishingManager:
             summary_message += f" {star_cost}星星"
 
         # 幸运币奖励
-        if actual_cost > 0:
+        if actual_cost > 0 and times >= 100:
             ratio = value / actual_cost
             if ratio > 3:
-                user_wallet.gold += 3
+                user_wallet.luckygold += 3
                 summary_message += "\n幸运币+3"
             elif ratio > 2.5:
-                user_wallet.gold += 2
+                user_wallet.luckygold += 2
                 summary_message += "\n幸运币+2"
             elif ratio > 2:
-                user_wallet.gold += 1
+                user_wallet.luckygold += 1
                 summary_message += "\n幸运币+1"
 
         # ===== 构建次数统计消息（放入合并转发） =====
@@ -351,7 +351,7 @@ class FishingManager:
         value_message += f"\n总花费：{actual_cost}金币"
         if config.star_price != 0:
             value_message += f" {star_cost}星星"
-        if actual_cost > 0:
+        if actual_cost > 0 and times >= 100:
             ratio = value / actual_cost
             if ratio > 3:
                 value_message += " 幸运币+3"
