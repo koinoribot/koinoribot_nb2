@@ -348,7 +348,7 @@ bag_cmd = on_command("背包", aliases={"我的背包"}, priority=5, block=True)
 async def handle_bag(uid: int = Depends(get_uid)) -> None:
     user_info = await FishingManager.get_user_info(uid)
 
-    msg = "\n背包：\n"
+    msg = "背包：\n"
     items = ""
     for item, count in user_info["fish"].items():
         if count > 0:

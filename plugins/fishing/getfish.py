@@ -34,7 +34,7 @@ PROBABILITY_2 = (25, 23, 20, 15, 9, 7, 1)
 
 # 默认用户背包
 DEFAULT_INFO = {
-    'fish': {'🐟': 0, '🦐': 0, '🦀': 0, '🐡': 0, '🐠': 0, '🔮': 1, '✉': 1, '🍙': 0, '🦈': 0, '🌟': 0},
+    'fish': {'🐟': 0, '🦐': 0, '🦀': 0, '🐡': 0, '🐠': 0, '🔮': 3, '✉': 3, '🍙': 0, '🦈': 0, '🌟': 0},
     'statis': {'free': 0, 'sell': 0, 'total_fish': 0, 'frags': 0},
     'rod': {'current': 0, 'total_rod': [0]}
 }
@@ -347,7 +347,7 @@ class FishingManager:
         value_message = f"\n总价值：{value}金币"
         if not have_star and config.extra_gold == 1 and times == 100:
             actual_value = value + 300
-            value_message = f"\n总价值：{actual_value}金币"
+            value_message = f"总价值：{actual_value}金币"
         value_message += f"\n总花费：{actual_cost}金币"
         if config.star_price != 0:
             value_message += f" {star_cost}星星"
