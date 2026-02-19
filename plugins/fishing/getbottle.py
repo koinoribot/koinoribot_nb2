@@ -31,14 +31,13 @@ class BottleManager:
         return "10001"
 
     @classmethod
-    def create_bottle(cls, bottle_id: str, uid: int, group_id: str, content: str) -> str:
+    def create_bottle(cls, bottle_id: str, uid: int, content: str) -> str:
         """
         创建新漂流瓶
 
         Args:
             bottle_id: 预留参数（实际使用 AUTOINCREMENT，忽略此值）
             uid: 用户ID
-            group_id: 群组ID
             content: 漂流瓶内容
 
         Returns:
@@ -47,8 +46,8 @@ class BottleManager:
         conn = DatabaseManager.get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO bottles (uid, group_id, content, created_time) VALUES (?, ?, ?, ?)",
-            (uid, group_id, content, int(time.time()))
+            "INSERT INTO bottles (uid, content, created_time) VALUES (?, ?, ?)",
+            (uid, content, int(time.time()))
         )
         real_id = str(cursor.lastrowid)
         conn.commit()
@@ -78,7 +77,7 @@ class BottleManager:
 
         # 随机选一个未删除的漂流瓶
         cursor.execute(
-            "SELECT id, uid, group_id, content, pick_count, created_time "
+            "SELECT id, uid, content, pick_count, created_time "
             "FROM bottles WHERE deleted = 0 ORDER BY RANDOM() LIMIT 1"
         )
         row = cursor.fetchone()
@@ -112,7 +111,6 @@ class BottleManager:
 
         bottle = {
             "uid": row["uid"],
-            "group_id": row["group_id"],
             "content": row["content"],
             "pick_count": new_pick,
             "time": row["created_time"],

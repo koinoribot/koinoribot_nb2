@@ -24,10 +24,10 @@ _db_initialized = False
 
 # 默认初始资产
 DEFAULT_ASSETS = {
-    "gold": 3000,  # 金币
-    "luckygold": 0,  # 幸运币
+    "gold": 5000,  # 金币
+    "luckygold": 6,  # 幸运币
     "starstone": 12500,  # 星星
-    "kirastone": 0,  # 羽毛石/宝石
+    "kirastone": 10,  # 羽毛石/宝石
     "last_login": 0,  # 最后签到日期
     "rp": 0,  # 运势值
     "logindays": 0,  # 连续签到天数

@@ -54,8 +54,12 @@ fish_help_cmd = on_command("钓鱼帮助", priority=5, block=True)
 # 钓鱼帮助内容（迁移自old_bot完整版）
 help_1 = """
 转账功能：
-转账 QQ号 金币数量
-示例：转账 123456 100
+转账qq QQ号 金币数量
+转账uid 用户UID 金币数量
+示例：
+转账qq 12345678 100
+转账uid 10001 100
+
 低保功能（仅限金币＜5000且没有私藏鱼饵和鱼时）：
 直接发送 领低保
 钓鱼功能：
@@ -607,7 +611,6 @@ throw_bottle_cmd = on_command("扔漂流瓶", priority=5, block=True)
 @throw_bottle_cmd.handle()
 async def handle_throw_bottle(
     uid: int = Depends(get_uid),
-    group_id: str = Depends(get_group_id),
     args: Message = CommandArg(),
 ) -> None:
     logger.debug("扔漂流瓶-开始")
@@ -634,7 +637,7 @@ async def handle_throw_bottle(
     await FishingManager.save_user_info(uid, user_info)
 
     # 生成漂流瓶并保存（ID由数据库自增生成）
-    bottle_id = BottleManager.create_bottle("", uid, group_id, content)
+    bottle_id = BottleManager.create_bottle("", uid, content)
 
     throw_freq.start_cd(uid)
 
