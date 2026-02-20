@@ -251,7 +251,7 @@ async def handle_view_uid(
 
 
 # ===== 注册验证码（仅私聊） =====
-register_code_cmd = on_command("注册验证码", aliases={"注册绑定验证码"}, priority=5, block=True)
+register_code_cmd = on_command("注册验证码", aliases={"注册绑定验证码", "注册绑定码"}, priority=5, block=True)
 
 
 @register_code_cmd.handle()
@@ -305,14 +305,14 @@ async def handle_bind(
     raw_msg = event.get_plaintext().strip()
     parts = raw_msg.split()
     if len(parts) < 2:
-        await bind_cmd.finish("请输入验证码，格式：绑定账号 <验证码>", at_sender=True)
+        await bind_cmd.finish("请输入验证码，格式：绑定账号 验证码", at_sender=True)
 
     code = parts[1].strip()
 
     # 校验验证码
     source_uid = verify_bind_code(code)
     if source_uid is None:
-        await bind_cmd.finish("验证码无效或已过期，请重新获取~", at_sender=True)
+        await bind_cmd.finish("验证码无效或已过期，请通过 注册绑定码 获取~", at_sender=True)
 
     # 判断当前用户平台
     if is_onebot(event):
