@@ -291,6 +291,9 @@ bind_cmd = on_command("绑定账号", priority=5, block=True)
 # 临时存储绑定上下文: {当前用户uid: {"source_uid": int, "current_uid": int, "current_platform": str, "current_external_id": str}}
 _bind_context: dict[int, dict] = {}
 
+# 绑定命令的频率限制器 (30秒)
+bind_limiter = FreqLimiter(30)
+
 
 @bind_cmd.handle()
 async def handle_bind(
@@ -299,7 +302,14 @@ async def handle_bind(
     uid: int = Depends(get_uid)
 ):
     """处理绑定账号命令"""
-
+    
+    # 频率限制检查
+    if not bind_limiter.check(uid):
+        left = round(bind_limiter.left_time(uid))
+        await bind_cmd.finish(
+            f"操作太快啦，请等待 {left} 秒后再尝试绑定~",
+            at_sender=True
+        )
 
     # 提取参数（验证码）
     raw_msg = event.get_plaintext().strip()
@@ -308,6 +318,9 @@ async def handle_bind(
         await bind_cmd.finish("请输入验证码，格式：绑定账号 验证码", at_sender=True)
 
     code = parts[1].strip()
+
+    # 马上开启 CD，防止接下来验证时间差导致同时间的爆破
+    bind_limiter.start_cd(uid)
 
     # 校验验证码
     source_uid = verify_bind_code(code)
