@@ -389,7 +389,7 @@ async def as_login_v3(uid: int, username: str, qqname: str, nick_flag: int, avat
                 pass
                 
     if is_default_avatar:
-        tip_text = BuildImage(0, 0, plain_text="当前为默认头像，可发送 上传头像[图片] 修改", font_size=10, font='yz.ttf',
+        tip_text = BuildImage(0, 0, plain_text="当前为默认头像，可发送 上传头像[图片] 修改", font_size=11, font='yz.ttf',
                                  font_color=(77, 83, 149), stroke_width=border, stroke_fill=(255, 255, 255))
         tip_w, tip_h = tip_text.size
         # 头像坐标是 (23, 23), 大小 100x100, 中心x为 73

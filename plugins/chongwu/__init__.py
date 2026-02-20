@@ -1125,7 +1125,7 @@ async def handle_my_pet_ranking(event: Event, bot: Bot, uid: int = Depends(get_u
 
 
 # ===== 技能帮助 =====
-skill_help_cmd = on_command("技能帮助", priority=5, block=True)
+skill_help_cmd = on_command("技能帮助", aliases={"技能百科"}, priority=5, block=True)
 
 skill_list = []
 for skill_name, skill_info in PET_SKILLS.items():

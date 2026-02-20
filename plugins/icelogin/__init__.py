@@ -12,7 +12,11 @@ from nonebot.plugin import PluginMetadata
 from nonebot.adapters import Event, Bot
 from nonebot.params import Depends
 from nonebot import logger
-
+import aiohttp
+import os
+from io import BytesIO
+from PIL import Image
+from .aslogin_v3 import get_src_path, del_custom_bg, dl_save_image, get_purse, as_login_v3
 # 导入核心模块
 from ... import money
 from ...utils import FreqLimiter
@@ -55,9 +59,6 @@ async def handle_login(
     
     # 获取用户昵称
     username = get_sender_nickname(event) or "用户"
-    
-    # 尝试调用签到卡片生成（如果可用）
-    from .aslogin_v3 import as_login_v3
     # 获取用户头像 URL
     avatar_url = get_user_avatar_url(event, uid=uid)
     image_bytes = await as_login_v3(
@@ -92,8 +93,6 @@ async def handle_purse(
     """处理钱包查看命令"""
     username = get_sender_nickname(event) or "用户"
     
-    # 尝试调用钱包卡片生成
-    from .aslogin_v3 import get_purse
     # 获取用户头像 URL
     avatar_url = get_user_avatar_url(event, uid=uid)
     image_bytes = await get_purse(uid=uid, user_name=username, avatar_url=avatar_url)
@@ -199,7 +198,6 @@ async def handle_upload_bg(
         await upload_bg_cmd.finish("金币不足...", at_sender=True)
     
     # 下载并保存图片（使用uid作为文件名）
-    from .aslogin_v3 import dl_save_image
     await dl_save_image(image_url, uid)
     
     # 扣除金币（如果需要）
@@ -222,7 +220,6 @@ async def handle_remove_bg(
     uid: int = Depends(get_uid)
 ):
     """处理清除签到图片命令"""
-    from .aslogin_v3 import del_custom_bg
     del_custom_bg(uid)
     
     await remove_bg_cmd.finish("已恢复默认背景~", at_sender=True)
@@ -512,58 +509,72 @@ async def handle_upload_avatar(
     # 从消息中提取图片URL
     image_url = None
     
-    # 尝试从原始消息中提取图片
-    try:
-        # OneBot v11 或 QQBot 格式
+    # 根据适配器类型尝试提取图片
+    from ...tools import is_qqbot, is_onebot
+    
+    if is_onebot(event):
         for seg in event.message:
             if seg.type == "image":
                 image_url = seg.data.get("url") or seg.data.get("file")
                 break
-    except:
-        pass
-    
+    elif is_qqbot(event):
+        # 官bot (QQBot): 附件中的图片为 Attachment 形式，或者在 message 当中
+        if hasattr(event, "attachments") and event.attachments:
+            for attachment in event.attachments:
+                # content_type 可能是 'image/jpeg' 等等，或者是根据 type='image' 或者有 url 字段来判断
+                if hasattr(attachment, "content_type") and "image" in str(attachment.content_type).lower():
+                    image_url = attachment.url
+                    # 官bot 返回的 url 可能以 http:// 开头，需要手动转成 https 提供下载，看接口表现，这里先直接取 url
+                    break
+                elif hasattr(attachment, "url") and attachment.url:
+                    image_url = attachment.url
+                    break
+        else:
+            # 如果从 message 下解析 QQBot 的 Attachment Segment
+            for seg in event.message:
+                if seg.type == "image" or seg.type == "attachment":
+                    image_url = seg.data.get("url")
+                    break
+                    
     if not image_url:
         await upload_avatar_cmd.finish("请加上图片一起发送哦~", at_sender=True)
+        return
     
     # 下载并保存裁剪图片
-    import aiohttp
-    import os
-    from io import BytesIO
-    from PIL import Image
-    from .aslogin_v3 import get_src_path
-    
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(image_url) as r:
                 content = await r.read()
                 
         img = Image.open(BytesIO(content)).convert("RGBA")
-        w, h = img.size
-        
-        # 居中裁剪为正方形 (1:1 取中间部分)
-        length = min(w, h)
-        left = (w - length) // 2
-        top = (h - length) // 2
-        right = left + length
-        bottom = top + length
-        img = img.crop((left, top, right, bottom))
-        
-        # 压缩图片以节省空间并统一大小
-        if hasattr(Image, 'Resampling'):
-            resample_method = Image.Resampling.LANCZOS
-        else:
-            resample_method = Image.ANTIALIAS
-        img = img.resize((256, 256), resample_method)
-        
-        # 保存为 png
-        srcpath = get_src_path()
-        save_dir = os.path.join(srcpath, "avatar")
-        os.makedirs(save_dir, exist_ok=True)
-        save_path = os.path.join(save_dir, f"{uid}.png")
-        
-        img.save(save_path, format="PNG")
-        
-        await upload_avatar_cmd.finish("头像上传成功并已自动裁剪~", at_sender=True)
-    except Exception as e:
+    except (aiohttp.ClientError, OSError, ValueError) as e:
         logger.error(f"上传头像失败: {e}")
         await upload_avatar_cmd.finish("头像上传失败或图片格式不正确...", at_sender=True)
+        return
+
+    w, h = img.size
+    
+    # 居中裁剪为正方形 (1:1 取中间部分)
+    length = min(w, h)
+    left = (w - length) // 2
+    top = (h - length) // 2
+    right = left + length
+    bottom = top + length
+    img = img.crop((left, top, right, bottom))
+    
+    # 压缩图片以节省空间并统一大小
+    if hasattr(Image, 'Resampling'):
+        resample_method = Image.Resampling.LANCZOS
+    else:
+        resample_method = Image.ANTIALIAS
+    img = img.resize((256, 256), resample_method)
+    
+    # 保存为 png
+    srcpath = get_src_path()
+    save_dir = os.path.join(srcpath, "avatar")
+    os.makedirs(save_dir, exist_ok=True)
+    save_path = os.path.join(save_dir, f"{uid}.png")
+    
+    img.save(save_path, format="PNG")
+    
+    await upload_avatar_cmd.finish("头像上传成功并已自动裁剪~", at_sender=True)
