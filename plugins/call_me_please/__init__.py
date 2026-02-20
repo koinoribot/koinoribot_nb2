@@ -16,7 +16,7 @@ from ...koinori_config import config
 from ...tools import get_uid, build_image_msg, get_sender_nickname
 from ...resources import get as get_res
 from ...su_manager import is_su, get_su_level
-from ..nickname import set_db_path, get_user_nickname, set_user_nickname
+from ...nickname import get_user_nickname, set_user_nickname
 
 __plugin_meta__ = PluginMetadata(
     name="call_me_please",
@@ -45,19 +45,6 @@ def get_what_image():
     except Exception as e:
         logger.warning(f"[call_me_please] 无法加载 问号.png 图像: {e}")
         return None
-
-# ===== 初始化 =====
-driver = get_driver()
-
-@driver.on_startup
-async def init_call_me_please():
-    """初始化数据库"""
-    from pathlib import Path
-    plugin_dir = Path(__file__).parent.parent.parent
-    db_path = plugin_dir / "src" / "database" / "koinoribot.db"
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    set_db_path(str(db_path))
-    logger.info("call_me_please 插件初始化完成")
 
 
 # ===== 核心功能：请叫我 =====
