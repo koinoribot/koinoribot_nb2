@@ -286,7 +286,7 @@ async def handle_register_code(
 
 
 # ===== 绑定账号 =====
-bind_cmd = on_command("绑定账号", priority=5, block=True)
+bind_cmd = on_command("绑定账号", aliases={"账号绑定"}, priority=5, block=True)
 
 # 临时存储绑定上下文: {当前用户uid: {"source_uid": int, "current_uid": int, "current_platform": str, "current_external_id": str}}
 _bind_context: dict[int, dict] = {}
