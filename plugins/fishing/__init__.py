@@ -735,7 +735,7 @@ async def handle_bottle_count() -> None:
 
 
 # ----- 捡指定漂流瓶（仅 SU） -----
-pick_by_id_cmd = on_command("捡指定漂流瓶", aliases={"查看指定漂流瓶"}, priority=4, block=True)
+pick_by_id_cmd = on_command("捡指定漂流瓶", aliases={"查看指定漂流瓶", "查看漂流瓶"}, priority=4, block=True)
 
 
 @pick_by_id_cmd.handle()
