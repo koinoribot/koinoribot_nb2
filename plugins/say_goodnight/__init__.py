@@ -11,7 +11,7 @@ __plugin_meta__ = PluginMetadata(
 )
 
 
-say_goodnight = on_command("说晚安")
+say_goodnight = on_command("晚安")
 
 
 @say_goodnight.handle()
