@@ -19,7 +19,7 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-
+appid.json
 # Virtual environments
 venv/
 ENV/
