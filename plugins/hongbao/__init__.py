@@ -159,7 +159,7 @@ async def handle_fa_hongbao(
     
     freq.start_cd(uid)
     
-    nickname = get_sender_nickname(event) or f"用户{uid}"
+    nickname = await get_sender_nickname(event) or f"用户{uid}"
     await fa_hongbao.finish(
         f"{nickname} 发了一个 {amount} 金币的红包，共 {num_packets} 份~\n发送「抢红包」来领取！"
     )

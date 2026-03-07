@@ -18,7 +18,7 @@ from . import money
 from . import resources
 from . import nickname
 from .koinori_config import config as koinori_config
-
+from . import tools as _tools
 __plugin_meta__ = PluginMetadata(
     name="koinoribot_nb2",
     description="Koinoribot NoneBot2 版本 - 集成多种娱乐功能",
@@ -53,6 +53,24 @@ async def init_koinoribot():
     uid_manager.init_uid_database()
     money.init_money_database()
     nickname.init_nickname_database()
+    
+    # 读取官Bot AppID配置
+    appid_path = plugin_dir / "appid.json"
+    try:
+        import json
+        with open(appid_path, "r", encoding="utf-8") as f:
+            appid_data = json.load(f)
+        appid = appid_data.get("appid", "")
+        openid_api = appid_data.get("openid_api", "")
+        if appid:
+            _tools.set_qqbot_appid(appid, openid_api)
+            nonebot.logger.info(f"已加载官Bot AppID: {appid}")
+        else:
+            nonebot.logger.warning("appid.json 中 appid 为空，官Bot用户昵称将显示为默认值")
+    except FileNotFoundError:
+        nonebot.logger.warning("未找到 appid.json，官Bot用户昵称将显示为默认值")
+    except Exception as e:
+        nonebot.logger.warning(f"读取 appid.json 失败: {e}，官Bot用户昵称将显示为默认值")
     
     nonebot.logger.info("Koinoribot NB2 初始化完成")
 

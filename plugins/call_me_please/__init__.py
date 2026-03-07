@@ -144,7 +144,7 @@ async def handle_who_am_i(bot: Bot, event: Event, uid: int = Depends(get_uid)):
         
     name = get_user_nickname(uid)
     if not name:
-        name = get_sender_nickname(event)
+        name = await get_sender_nickname(event)
         if not name:
             name = "无名氏"
             

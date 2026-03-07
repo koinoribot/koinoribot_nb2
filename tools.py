@@ -14,6 +14,7 @@ from nonebot.log import logger
 from nonebot.params import Depends
 import httpx
 import io
+import time as _time
 import textwrap
 from .build_image import BuildImage
 
@@ -60,9 +61,55 @@ def get_group_id_optional(event: Event) -> Optional[str]:
         return None
 
 
+# ===== QQ Bot 昵称 API =====
+
+_qqbot_appid: str = ""
+_qqbot_openid_api: str = ""
+_nickname_cache: dict[str, tuple[str, float]] = {}  # {openid: (nickname, timestamp)}
+_NICKNAME_CACHE_TTL = 3600  # 缓存1小时
+
+
+def set_qqbot_appid(appid: str, api_url: str = ""):
+    """设置官Bot AppID和API地址（启动时调用）"""
+    global _qqbot_appid, _qqbot_openid_api
+    _qqbot_appid = appid
+    _qqbot_openid_api = api_url
+
+
+async def _fetch_qqbot_nickname(openid: str) -> str:
+    """通过 API 获取官Bot用户昵称（带缓存）"""
+    if not _qqbot_appid or not _qqbot_openid_api:
+        return ""
+    
+    # 检查缓存
+    if openid in _nickname_cache:
+        cached_name, cached_time = _nickname_cache[openid]
+        if _time.time() - cached_time < _NICKNAME_CACHE_TTL:
+            return cached_name
+    
+    # 请求 API
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                _qqbot_openid_api,
+                params={"appid": _qqbot_appid, "openid": openid},
+                timeout=3
+            )
+            data = resp.json()
+            if data.get("code") == 1:
+                nickname = data.get("data", {}).get("nickname", "")
+                if nickname:
+                    _nickname_cache[openid] = (nickname, _time.time())
+                    return nickname
+    except Exception as e:
+        logger.debug(f"获取官Bot用户昵称失败: {e}")
+    
+    return ""
+
+
 # ===== 用户信息相关 =====
 
-def get_sender_nickname(event: Event) -> str:
+async def get_sender_nickname(event: Event) -> str:
     """获取发送者昵称"""
     try:
         platform_uid = event.get_user_id()
@@ -77,6 +124,12 @@ def get_sender_nickname(event: Event) -> str:
         if event.sender:
             return event.sender.nickname or event.sender.card or ""
     if isinstance(event, qq.Event):
+        # 优先通过 API 获取昵称
+        openid = event.get_user_id()
+        api_nickname = await _fetch_qqbot_nickname(openid)
+        if api_nickname:
+            return api_nickname
+        # 回退到事件自带的昵称
         if hasattr(event, 'author') and event.author:
             return getattr(event.author, 'username', '') or ""
     return ""

@@ -58,7 +58,7 @@ async def handle_login(
         )
     
     # 获取用户昵称
-    username = get_sender_nickname(event) or "用户"
+    username = await get_sender_nickname(event) or "用户"
     # 获取用户头像 URL
     avatar_url = get_user_avatar_url(event, uid=uid)
     image_bytes = await as_login_v3(
@@ -91,7 +91,7 @@ async def handle_purse(
     uid: int = Depends(get_uid)
 ):
     """处理钱包查看命令"""
-    username = get_sender_nickname(event) or "用户"
+    username = await get_sender_nickname(event) or "用户"
     
     # 获取用户头像 URL
     avatar_url = get_user_avatar_url(event, uid=uid)

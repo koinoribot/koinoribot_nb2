@@ -138,7 +138,7 @@ async def twenty_four_answer_handle(event: Event, args: Message = CommandArg()) 
     if answer_ == 24:  # noqa: PLR2004
         twenty_four_games.pop(group_id)
         await get_twenty_four_answer.finish(
-            f"{format_}={answer_}，{get_sender_nickname(event)}回答正确~"
+            f"{format_}={answer_}，{await get_sender_nickname(event)}回答正确~"
         )
     else:
         await get_twenty_four_answer.finish(f"{format_}={answer_}，答案不对喔...")
