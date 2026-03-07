@@ -670,6 +670,44 @@ async def handle_learn_skill(event: Event, bot: Bot, uid: int = Depends(get_uid)
         await learn_skill_cmd.finish("学习失败了...技能药水已消耗。", at_sender=True)
 
 
+# ===== 遗忘技能 =====
+forget_skill_cmd = on_command("遗忘技能", priority=5, block=True)
+
+@forget_skill_cmd.handle()
+async def handle_forget_skill(
+    event: Event, bot: Bot,
+    args: Message = CommandArg(),
+    uid: int = Depends(get_uid)
+):
+    skill_name = args.extract_plain_text().strip()
+    if not skill_name:
+        await forget_skill_cmd.finish("请指定要遗忘的技能名称！\n例如：遗忘 宝石爱好者", at_sender=True)
+
+    if not await use_user_item(uid, "遗忘药水"):
+        await forget_skill_cmd.finish("你没有遗忘药水！购买需要10宝石。", at_sender=True)
+
+    pet = await get_user_pet(uid)
+    if not pet or pet.get("temp_data"):
+        await add_user_item(uid, "遗忘药水")
+        await forget_skill_cmd.finish("你还没有宠物！", at_sender=True)
+
+    pet = await update_pet_status(pet)
+    if pet.get("runaway"):
+        await add_user_item(uid, "遗忘药水")
+        await forget_skill_cmd.finish(f"你的宠物【{pet['name']}】离家出走了！", at_sender=True)
+
+    if skill_name not in pet.get("skills", []):
+        await add_user_item(uid, "遗忘药水")
+        current_skills = "、".join(pet.get("skills", [])) or "暂无"
+        await forget_skill_cmd.finish(
+            f"你的宠物没有学会【{skill_name}】！\n当前技能：{current_skills}", at_sender=True)
+
+    pet["skills"].remove(skill_name)
+    await update_user_pet(uid, pet)
+    await forget_skill_cmd.finish(
+        f"💫 {pet['name']}遗忘了【{skill_name}】！\n当前剩余技能：{'、'.join(pet['skills']) or '暂无'}", at_sender=True)
+
+
 # ===== 宠物事件 =====
 pet_event_cmd = on_command("宠物事件", priority=5, block=True)
 
