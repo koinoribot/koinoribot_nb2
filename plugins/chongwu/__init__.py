@@ -34,6 +34,7 @@ from .pet import (
 )
 from ...su_manager import is_su
 from ..fishing.util import DatabaseManager
+from ...nickname import get_user_nickname
 
 __plugin_meta__ = PluginMetadata(
     name="chongwu",
@@ -1081,12 +1082,15 @@ async def handle_pet_ranking(event: Event, bot: Bot):
         await pet_ranking_cmd.finish("目前还没有成年体宠物上榜哦！", at_sender=True)
 
     adult_pets.sort(reverse=True)
-
+    
     msg = ["🏆 宠物排行榜-TOP10 🏆"]
     for rank, (growth, name, pet_type, _uid) in enumerate(adult_pets[:10], 1):
-        msg.append(f"第{rank}名: {name}({pet_type}) \n成长值: {growth:.1f}")
+        owner_name = get_user_nickname(int(_uid)) or f"UID{_uid}"
+        msg.append(f"第{rank}名: {name}({pet_type}) - 主人:{owner_name}\n成长值: {growth:.1f}")
 
-    await pet_ranking_cmd.finish("\n".join(msg), at_sender=True)
+    msg_str = "\n".join(msg)
+    chain = await build_forward_chain(bot, [msg_str])
+    await send_group_forward_msg(event, bot, chain)
 
 
 # ===== 宠物排名 =====

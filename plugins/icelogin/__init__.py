@@ -20,12 +20,14 @@ from .aslogin_v3 import get_src_path, del_custom_bg, dl_save_image, get_purse, a
 # 导入核心模块
 from ... import money
 from ...utils import FreqLimiter
-from ...tools import get_uid, get_sender_nickname, get_user_avatar_url, is_qqbot, is_onebot
+from ...tools import get_uid, get_sender_nickname, get_user_avatar_url, is_qqbot, is_onebot, build_forward_chain, send_group_forward_msg
 import nonebot.adapters.onebot.v11 as onebot_adapter
 from ...uid_manager import (
     verify_bind_code, get_external_ids, rebind_external_id,
     delete_uid_mapping
 )
+from ...nickname import get_user_nickname
+from ... import money
 
 __plugin_meta__ = PluginMetadata(
     name="icelogin",
@@ -140,7 +142,8 @@ async def handle_gold_ranking(
     msg_parts = ["🏆 金币排行榜-TOP10 🏆"]
     for rank, (user_id, gold) in enumerate(ranked_list[:10], 1):
         gold_in_wan = gold / 10000
-        msg_parts.append(f"第{rank}名: UID {user_id}: {gold_in_wan:.2f}万")
+        owner_name = get_user_nickname(int(user_id)) or f"UID {user_id}"
+        msg_parts.append(f"第{rank}名: {owner_name}: {gold_in_wan:.2f}万")
     
     # 当前用户排名
     user_rank = -1
@@ -159,8 +162,12 @@ async def handle_gold_ranking(
         user_rank_msg = "您未参与排名"
     
     msg_parts.append(f"\n{user_rank_msg}")
+
+    msg_parts.append(f"\n\n\n使用 冰祈请叫我 可以修改自己的昵称哦~")
     
-    await rank_cmd.finish("\n".join(msg_parts), at_sender=True)
+    msg_str = "\n".join(msg_parts)
+    chain = await build_forward_chain(bot, [msg_str])
+    await send_group_forward_msg(event, bot, chain)
 
 
 # ===== 上传签到图片 =====
@@ -248,6 +255,51 @@ async def handle_view_uid(
     )
 
     await view_uid_cmd.finish(msg, at_sender=True)
+
+
+# ===== 查找UID =====
+find_uid_cmd = on_command("查找uid", aliases={"查询uid"}, priority=5, block=True)
+
+@find_uid_cmd.handle()
+async def handle_find_uid(
+    event: Event,
+    bot: Bot,
+    uid: int = Depends(get_uid)
+):
+    """处理查找UID命令"""
+    msg = event.get_plaintext().strip().split(maxsplit=1)
+    if len(msg) < 2 or not msg[1].isdigit():
+        await find_uid_cmd.finish("请输入正确的uid，格式：查找uid [目标uid]", at_sender=True)
+    
+    target_uid = int(msg[1])
+    
+    # 检查金币
+    user_gold = money.get_user_money(uid, 'gold') or 0
+    cost = 10000
+    
+    if user_gold < cost:
+        await find_uid_cmd.finish(f"金币不足...查找uid需要花费 {cost} 金币", at_sender=True)
+        
+    # 查询信息
+    from ...uid_manager import get_external_ids
+    target_ids = get_external_ids(target_uid)
+    
+    qq_display = target_ids["onebot_id"] if target_ids["onebot_id"] else "未绑定"
+    openid_display = target_ids["qqbot_id"] if target_ids["qqbot_id"] else "未绑定"
+    
+    if qq_display == "未绑定" and openid_display == "未绑定":
+        await find_uid_cmd.finish("目标uid不存在或未绑定任何平台。", at_sender=True)
+        
+    # 扣除金币
+    money.reduce_user_money(uid, 'gold', cost)
+    
+    ret_msg = (
+        f"消耗 {cost} 金币，为您查询到uid={target_uid}的信息：\n"
+        f"--qq：{qq_display}\n"
+        f"--openid：{openid_display}"
+    )
+    
+    await find_uid_cmd.finish(ret_msg, at_sender=True)
 
 
 # ===== 注册验证码（仅私聊） =====

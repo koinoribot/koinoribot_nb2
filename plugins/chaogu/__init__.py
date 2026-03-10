@@ -26,6 +26,7 @@ from ... import money
 from ...koinori_config import config
 from ...tools import get_uid, send_group_forward_msg, build_forward_chain, get_at_uid, build_image_msg
 from ..fishing.util import DatabaseManager as FishingDB
+from ...nickname import get_user_nickname
 
 from .stock_utils import (
     set_db_path, init_stock_database,
@@ -883,11 +884,13 @@ async def handle_gamble_ranking(event: Event, bot: Bot):
     
     msg = "梦灵的零花钱都给了谁：\n"
     for i, (uid, net_gain) in enumerate(sorted_users[:10], 1):
-        msg += f"第{i}名: UID{uid} 累计取走: {net_gain}金币\n"
+        owner_name = get_user_nickname(int(uid)) or f"UID{uid}"
+        msg += f"第{i}名: {owner_name} 累计取走: {net_gain}金币\n"
     
     if len(sorted_users) == 0:
         msg += "暂无零花钱记录"
     
+    msg += "\n\n\n使用 冰祈请叫我 可以修改自己的昵称哦~"
     chain = await build_forward_chain(bot, [msg])
     await send_group_forward_msg(event, bot, chain)
 
@@ -913,11 +916,13 @@ async def handle_gamble_loss_ranking(event: Event, bot: Bot):
     
     msg = "梦灵的零花钱来源：\n"
     for i, (uid, net_contribution) in enumerate(sorted_users[:10], 1):
-        msg += f"第{i}名: UID{uid} 累计存入: {net_contribution}金币\n"
+        owner_name = get_user_nickname(int(uid)) or f"UID{uid}"
+        msg += f"第{i}名: {owner_name} 累计存入: {net_contribution}金币\n"
     
     if len(sorted_users) == 0:
         msg += "暂无零花钱记录"
     
+    msg += "\n\n\n使用 冰祈请叫我 可以修改自己的昵称哦~"
     chain = await build_forward_chain(bot, [msg])
     await send_group_forward_msg(event, bot, chain)
 

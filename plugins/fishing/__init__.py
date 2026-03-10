@@ -24,6 +24,7 @@ from ...utils import FreqLimiter
 from .getbottle import BottleManager
 from .getfish import FISH_LIST, FISH_PRICE, PROBABILITY, PROBABILITY_2, FishingManager
 from .serif import COOL_TIME_SERIF, GET_FISH_SERIF, NO_FISH_SERIF
+from ...nickname import get_user_nickname
 
 # 导入重构后的模块
 from .util import CooldownManager, DatabaseManager
@@ -690,11 +691,17 @@ async def handle_pick_bottle(bot: Bot, event: Event, uid: int = Depends(get_uid)
         "%Y-%m-%d %H:%M"
     )
 
+    thrower_uid = bottle.get('uid', '未知')
+    if str(thrower_uid).isdigit():
+        thrower_name = get_user_nickname(int(thrower_uid)) or f"UID {thrower_uid}"
+    else:
+        thrower_name = thrower_uid
+
     bottle_msg = f"🍾 漂流瓶 #{bottle_id}\n"
     bottle_msg += f"━━━━━━━━━━\n"
     bottle_msg += f"{bottle['content']}\n"
     bottle_msg += f"━━━━━━━━━━\n"
-    bottle_msg += f"投放者UID: {bottle.get('uid', '未知')}\n"
+    bottle_msg += f"投放者: {thrower_name}\n"
     bottle_msg += f"投放时间: {create_time}\n"
     bottle_msg += f"被捞起次数: {bottle['pick_count']}"
 
