@@ -167,7 +167,7 @@ def is_qqbot(event: Event) -> bool:
 async def send_group_forward_msg(
     event: Event, 
     bot: Bot, 
-    messages: List[Dict[str, Any]]
+    messages
 ) -> None:
     """
     发送合并转发消息
@@ -175,7 +175,7 @@ async def send_group_forward_msg(
     Args:
         event: 事件对象
         bot: Bot 对象
-        messages: 合并转发消息节点列表
+        messages: 合并转发消息节点列表（onebot.Message 或 List[MessageSegment]）
     
     Note:
         QQ-Bot 不支持合并转发，会降级为普通消息依次发送
@@ -184,9 +184,25 @@ async def send_group_forward_msg(
         await bot.send_group_forward_msg(group_id=event.group_id, messages=messages)
     else:
         # QQ-Bot 降级为普通消息
+        # 将 messages 统一转为可迭代的节点列表
+        node_list = list(messages) if isinstance(messages, onebot.Message) else messages
+        
+        # 提取节点中的 content 用于图片转换
+        _compat_nodes = []
+        for node in node_list:
+            if isinstance(node, onebot.MessageSegment) and node.type == "node":
+                _compat_nodes.append({
+                    "data": {
+                        "name": node.data.get("nickname", "用户"),
+                        "content": node.data.get("content", ""),
+                    }
+                })
+            elif isinstance(node, dict):
+                _compat_nodes.append(node)
+        
         # 尝试转换为图片发送
         try:
-            img_bytes = await _nodes_to_image(messages)
+            img_bytes = await _nodes_to_image(_compat_nodes)
             if img_bytes:
                 await bot.send(event, qq.MessageSegment.file_image(img_bytes))
                 return
@@ -194,63 +210,66 @@ async def send_group_forward_msg(
             logger.error(f"合并转发转图片失败: {e}")
 
         # 图片生成失败，回退到逐条发送
-        for node in messages:
-            if isinstance(node, dict) and 'data' in node:
-                content = node['data'].get('content', [])
-                
-                msg_to_send = qq.Message()
-                if isinstance(content, list):
-                    for segment in content:
-                        if isinstance(segment, dict):
-                            seg_type = segment.get('type')
-                            seg_data = segment.get('data', {})
-                            
-                            if seg_type == 'text':
-                                text = seg_data.get('text', '')
-                                if text:
-                                    msg_to_send.append(qq.MessageSegment.text(text))
-                            elif seg_type == 'image':
-                                file_uri = seg_data.get('file', '')
-                                if file_uri.startswith('base64://'):
-                                    try:
-                                        b64_data = file_uri.replace('base64://', '')
-                                        img_bytes = base64.b64decode(b64_data)
-                                        msg_to_send.append(qq.MessageSegment.file_image(img_bytes))
-                                    except Exception as e:
-                                        logger.error(f"解析合并转发图片失败: {e}")
-                                        msg_to_send.append(qq.MessageSegment.text("[图片解析失败]"))
-                                elif file_uri.startswith('http'):
-                                    msg_to_send.append(qq.MessageSegment.image(file_uri))
-                                else:
-                                    # 尝试获取 url 字段
-                                    url = seg_data.get('url')
-                                    if url:
-                                        msg_to_send.append(qq.MessageSegment.image(url))
-                                    else:
-                                        msg_to_send.append(qq.MessageSegment.text("[不支持的图片格式]"))
-                                        
-                elif isinstance(content, str):
-                    msg_to_send.append(qq.MessageSegment.text(content))
-                
-                if msg_to_send:
-                    await bot.send(event, msg_to_send)
+        for node in _compat_nodes:
+            content = node.get('data', {}).get('content', '')
+            
+            msg_to_send = qq.Message()
+            if isinstance(content, (onebot.Message, list)):
+                for segment in content:
+                    if isinstance(segment, onebot.MessageSegment):
+                        seg_type = segment.type
+                        seg_data = segment.data
+                    elif isinstance(segment, dict):
+                        seg_type = segment.get('type')
+                        seg_data = segment.get('data', {})
+                    else:
+                        continue
+                    
+                    if seg_type == 'text':
+                        text = seg_data.get('text', '')
+                        if text:
+                            msg_to_send.append(qq.MessageSegment.text(text))
+                    elif seg_type == 'image':
+                        file_uri = seg_data.get('file', '')
+                        if file_uri.startswith('base64://'):
+                            try:
+                                b64_data = file_uri.replace('base64://', '')
+                                img_bytes = base64.b64decode(b64_data)
+                                msg_to_send.append(qq.MessageSegment.file_image(img_bytes))
+                            except Exception as e:
+                                logger.error(f"解析合并转发图片失败: {e}")
+                                msg_to_send.append(qq.MessageSegment.text("[图片解析失败]"))
+                        elif file_uri.startswith('http'):
+                            msg_to_send.append(qq.MessageSegment.image(file_uri))
+                        else:
+                            url = seg_data.get('url')
+                            if url:
+                                msg_to_send.append(qq.MessageSegment.image(url))
+                            else:
+                                msg_to_send.append(qq.MessageSegment.text("[不支持的图片格式]"))
+                                    
+            elif isinstance(content, str):
+                msg_to_send.append(qq.MessageSegment.text(content))
+            
+            if msg_to_send:
+                await bot.send(event, msg_to_send)
 
 
 async def build_forward_node(
     bot: Bot,
     msg,
     user_id: int = 0
-) -> Dict[str, Any]:
+) -> onebot.MessageSegment:
     """
     构建合并转发消息节点
     
     Args:
         bot: Bot 对象
-        msg: 消息内容（str 或消息段列表）
+        msg: 消息内容（str 或消息段列表或 onebot.Message）
         user_id: 发送者 ID（0 表示使用 bot 自身）
     
     Returns:
-        合并转发消息节点字典
+        onebot.MessageSegment (node_custom 类型)
     """
     if not user_id:
         user_id = int(bot.self_id)
@@ -264,8 +283,12 @@ async def build_forward_node(
     if not user_name.strip():
         user_name = '用户'
     
-    # 构建 onebot.Message 对象，确保协议端能正确解析
-    if isinstance(msg, list):
+    # 构建 onebot.Message 内容
+    if isinstance(msg, onebot.Message):
+        content = msg
+    elif isinstance(msg, onebot.MessageSegment):
+        content = onebot.Message([msg])
+    elif isinstance(msg, list):
         # msg 是消息段列表 [{"type": "text", "data": {"text": "..."}}]
         ob_msg = onebot.Message()
         for seg in msg:
@@ -274,28 +297,22 @@ async def build_forward_node(
             elif isinstance(seg, onebot.MessageSegment):
                 ob_msg.append(seg)
         content = ob_msg
-    elif isinstance(msg, onebot.Message):
-        content = msg
-    elif isinstance(msg, onebot.MessageSegment):
-        content = onebot.Message([msg])
     else:
         content = onebot.Message([onebot.MessageSegment.text(str(msg))])
     
-    return {
-        "type": "node",
-        "data": {
-            "name": user_name,
-            "uin": str(user_id),
-            "content": content
-        }
-    }
+    # 使用 MessageSegment.node_custom 构建节点，确保 DataclassEncoder 能正确序列化
+    return onebot.MessageSegment.node_custom(
+        user_id=user_id,
+        nickname=user_name,
+        content=content
+    )
 
 
 async def build_forward_chain(
     bot: Bot,
     messages: List[str],
     user_id: int = 0
-) -> List[Dict[str, Any]]:
+) -> onebot.Message:
     """
     批量构建合并转发消息链
     
@@ -305,9 +322,9 @@ async def build_forward_chain(
         user_id: 发送者 ID
     
     Returns:
-        合并转发消息节点列表
+        onebot.Message 包含的 node_custom 节点列表
     """
-    chain = []
+    chain = onebot.Message()
     for msg in messages:
         node = await build_forward_node(bot, msg, user_id)
         chain.append(node)
