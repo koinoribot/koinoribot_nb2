@@ -559,7 +559,7 @@ async def generate_su_code(uid: int) -> str:
         logger.error(f"[feisheng] 获取激活码异常: {e}")
         return ""
 
-get_code_cmd = on_command("获取激活码", priority=5, block=True)
+get_code_cmd = on_command("获取激活码", aliases={"注册激活码"}, priority=5, block=True)
 
 @get_code_cmd.handle()
 async def handle_get_code(event: Event, bot: Bot, uid: int = Depends(get_uid)):
