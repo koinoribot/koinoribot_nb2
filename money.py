@@ -17,6 +17,7 @@ from nonebot.log import logger
 from nonebot.params import Depends
 
 from .tools import get_uid
+from .koinori_config import get_config
 
 # 数据库路径
 _db_path: Optional[str] = None
@@ -35,6 +36,9 @@ DEFAULT_ASSETS = {
     "goodluck": 0,  # 宜做事项索引
     "badluck": 0,  # 忌做事项索引
 }
+
+# 资产上限
+GOLD_MAX = get_config().gold_max
 
 KEYWORD_LIST = list(DEFAULT_ASSETS.keys())
 KEY_LIST = ["gold", "luckygold", "starstone", "kirastone"]
@@ -211,6 +215,9 @@ def set_user_money(uid: int, key: str, value: int) -> int:
     if key not in KEYWORD_LIST:
         return 0
 
+    if key == "gold":
+        value = min(value, GOLD_MAX)
+
     conn = None
     try:
         conn = _get_connection()
@@ -252,9 +259,15 @@ def increase_user_money(uid: int, key: str, value: int) -> int:
         cursor = conn.cursor()
 
         _ensure_user_exists(cursor, uid)
-        cursor.execute(
-            f"UPDATE user_money SET {key} = {key} + ? WHERE uid = ?", (value, uid)
-        )
+        if key == "gold":
+            cursor.execute(
+                f"UPDATE user_money SET {key} = MIN({key} + ?, ?) WHERE uid = ?",
+                (value, GOLD_MAX, uid),
+            )
+        else:
+            cursor.execute(
+                f"UPDATE user_money SET {key} = {key} + ? WHERE uid = ?", (value, uid)
+            )
 
         conn.commit()
         return 1
@@ -319,7 +332,10 @@ def increase_all_user_money(key: str, value: int) -> int:
         conn = _get_connection()
         cursor = conn.cursor()
 
-        cursor.execute(f"UPDATE user_money SET {key} = {key} + ?", (value,))
+        if key == "gold":
+            cursor.execute(f"UPDATE user_money SET {key} = MIN({key} + ?, ?)", (value, GOLD_MAX))
+        else:
+            cursor.execute(f"UPDATE user_money SET {key} = {key} + ?", (value,))
 
         conn.commit()
         return 1
@@ -615,6 +631,7 @@ def set_user_wallet(uid: int, wallet: UserWallet) -> None:
 
         logger.debug("正在设置用户数据...")
 
+        wallet.gold = min(wallet.gold, GOLD_MAX)
         cursor.execute(
             "UPDATE user_money SET gold = ?, luckygold = ?, starstone = ?, kirastone = ? WHERE uid = ?",  # noqa: E501
             (wallet.gold, wallet.luckygold, wallet.starstone, wallet.kirastone, uid),
