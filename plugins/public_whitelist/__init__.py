@@ -227,16 +227,12 @@ async def _whitelist_filter(event: Event):
     if not self_id:
         return
 
+    # koinori自己的bot账号不受白名单限制
     permit_bot = {str(b) for b in config.permit_bot}
-    if not permit_bot:
+    if self_id in permit_bot:
         return
 
-    if self_id not in permit_bot:
-        return
-
-    if not _cache_bot_set:
-        return
-
+    # 外部bot：必须在白名单中
     if self_id not in _cache_bot_set:
         raise IgnoredException(
             f"[public_whitelist] bot({self_id}) 不在白名单中，事件已忽略"
