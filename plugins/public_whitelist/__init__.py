@@ -259,13 +259,12 @@ async def handle_adopt_start(
     bot: Bot,
     uid: int = Depends(get_uid)
 ):
-    """领养云冰祈 — 第一步：检查资格，开始流程"""
+    """第一步：检查资格，开始流程"""
     group_id = get_group_id_optional(event)
 
     if not group_id:
         await adopt_cmd.finish("领养云冰祈仅支持群聊~")
 
-    # 获取主人QQ号（必须绑定QQ号才能领养）
     external_ids = get_external_ids(uid)
     owner_qq = external_ids.get('onebot_id')
     if not owner_qq:
@@ -275,14 +274,12 @@ async def handle_adopt_start(
             at_sender=True
         )
 
-    # 检查是否已有白名单
     if owner_qq in _cache_owner_to_bot:
         await adopt_cmd.finish(
             "你已经领养过一个云冰祈了~\n如果想重新领养，请先 注销云冰祈",
             at_sender=True
         )
 
-    # 检查是否已有待审核的申请
     conn = sqlite3.connect(_get_db_path())
     try:
         row = conn.execute(
@@ -297,7 +294,6 @@ async def handle_adopt_start(
     finally:
         conn.close()
 
-    # 初始化申请上下文（key 用 event.get_user_id() 以便 pause 后匹配）
     _apply_context[event.get_user_id()] = {
         'step': 'bot_qq',
         'owner_qq': owner_qq,
@@ -315,147 +311,171 @@ async def handle_adopt_start(
 
 
 @adopt_cmd.handle()
-async def handle_adopt_step(
+async def handle_step_bot_qq(
     event: Event,
     bot: Bot,
     uid: int = Depends(get_uid)
 ):
-    """领养云冰祈 — 多轮对话步骤处理"""
+    """第二步：输入bot QQ"""
     user_id = event.get_user_id()
     user_input = event.get_plaintext().strip()
-
     ctx = _apply_context.get(user_id)
     if not ctx:
         return
-
-    step = ctx.get('step', '')
-
     if user_input == '退出':
         _apply_context.pop(user_id, None)
         await adopt_cmd.finish("已结束领养云冰祈~", at_sender=True)
 
-    # Step 1: 输入bot QQ
-    if step == 'bot_qq':
-        if not user_input.isdigit():
-            await adopt_cmd.reject("需要输入QQ号码~", at_sender=True)
+    if not user_input.isdigit():
+        await adopt_cmd.reject("需要输入QQ号码~", at_sender=True)
+    if user_input == ctx['owner_qq']:
+        await adopt_cmd.reject("请使用bot账号的QQ~而且不能是自己的QQ", at_sender=True)
+    if user_input in _cache_bot_set:
+        await adopt_cmd.finish("该bot已被认领~", at_sender=True)
 
-        if user_input == user_id:
-            await adopt_cmd.reject("请使用bot账号的QQ~而且不能是自己的QQ", at_sender=True)
+    conn = sqlite3.connect(_get_db_path())
+    try:
+        row = conn.execute(
+            'SELECT id FROM whitelist_review WHERE bot_qq = ? AND status = ?',
+            (user_input, 'pending')
+        ).fetchone()
+        if row:
+            await adopt_cmd.finish("该bot已有待审核的领养申请~", at_sender=True)
+    finally:
+        conn.close()
 
-        # 检查bot QQ是否已被注册
-        if user_input in _cache_bot_set:
-            await adopt_cmd.finish("该bot已被认领~", at_sender=True)
+    ctx['bot_qq'] = user_input
+    await adopt_cmd.send(
+        f"bot QQ: {user_input}\n\n请输入领养理由（如：想让bot活跃群气氛、在别的群使用冰祈、仅自用等）：",
+        at_sender=True
+    )
+    await adopt_cmd.pause()
 
-        # 检查bot QQ是否已有待审核申请
-        conn = sqlite3.connect(_get_db_path())
-        try:
-            row = conn.execute(
-                'SELECT id FROM whitelist_review WHERE bot_qq = ? AND status = ?',
-                (user_input, 'pending')
-            ).fetchone()
-            if row:
-                await adopt_cmd.finish("该bot已有待审核的领养申请~", at_sender=True)
-        finally:
-            conn.close()
 
-        ctx['bot_qq'] = user_input
-        ctx['step'] = 'reason'
-        await adopt_cmd.send(
-            f"bot QQ: {user_input}\n\n请输入领养理由（如：想让bot活跃群气氛、在别的群使用冰祈、仅自用等）：",
-            at_sender=True
-        )
-        await adopt_cmd.pause()
+@adopt_cmd.handle()
+async def handle_step_reason(
+    event: Event,
+    bot: Bot,
+    uid: int = Depends(get_uid)
+):
+    """第三步：输入领养理由"""
+    user_id = event.get_user_id()
+    user_input = event.get_plaintext().strip()
+    ctx = _apply_context.get(user_id)
+    if not ctx:
         return
-
-    # Step 2: 输入领养理由
-    if step == 'reason':
-        ctx['reason'] = user_input
-        ctx['step'] = 'compliance'
-        await adopt_cmd.send(
-            "请确认是否承诺合规使用云冰祈：\n"
-            "- 不用于违法、违规用途\n"
-            "- 不用于骚扰、广告等行为\n"
-            "- 遵守QQ平台用户协议\n\n"
-            "请回复 我承诺合规使用 确认：",
-            at_sender=True
-        )
-        await adopt_cmd.pause()
-        return
-
-    # Step 3: 确认合规承诺
-    if step == 'compliance':
-        if user_input != '我承诺合规使用':
-            await adopt_cmd.reject(
-                "请回复 我承诺合规使用 来确认承诺，或回复 退出 取消申请",
-                at_sender=True
-            )
-
-        ctx['compliance_commit'] = user_input
-        ctx['step'] = 'confirm'
-
-        # 汇总信息
-        summary = (
-            "=== 领养申请确认 ===\n"
-            f"主人QQ: {ctx['owner_qq']}\n"
-            f"bot QQ: {ctx['bot_qq']}\n"
-            f"领养理由: {ctx['reason']}\n"
-            f"合规承诺: {ctx['compliance_commit']}\n"
-            f"申请群号: {ctx['group_id']}\n"
-            f"申请时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"==================\n"
-            "回复 确认提交 提交审核，或回复 退出 取消"
-        )
-        await adopt_cmd.send(summary, at_sender=True)
-        await adopt_cmd.pause()
-        return
-
-    # Step 4: 确认提交
-    if step == 'confirm':
-        if user_input != '确认提交':
-            await adopt_cmd.reject(
-                "请回复 确认提交 来提交申请，或回复 退出 取消",
-                at_sender=True
-            )
-
-        # 保存到审核列表
-        now_iso = datetime.now().isoformat()
-        conn = sqlite3.connect(_get_db_path())
-        try:
-            cursor = conn.cursor()
-            cursor.execute(
-                '''INSERT INTO whitelist_review
-                   (owner_qq, bot_qq, reason, compliance_commit, group_id, status, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                (ctx['owner_qq'], ctx['bot_qq'], ctx['reason'],
-                 ctx['compliance_commit'], ctx['group_id'], 'pending', now_iso)
-            )
-            conn.commit()
-            review_id = cursor.lastrowid
-        finally:
-            conn.close()
-
-        owner_qq = ctx['owner_qq']
+    if user_input == '退出':
         _apply_context.pop(user_id, None)
+        await adopt_cmd.finish("已结束领养云冰祈~", at_sender=True)
 
-        # 发送WS连接信息私信
-        ws_info = get_ws_info()
-        ws_help = "\n".join(ws_info.get('connection_help', []))
-        await send_private_message(bot, event, uid,
-            f"=== 云冰祈领养申请已提交 ===\n"
-            f"申请编号: {review_id}\n"
-            f"bot QQ: {ctx['bot_qq']}\n\n"
-            f"请先配置你的bot连接：\n{ws_help}\n\n"
-            f"WS地址: {ws_info.get('ws_address', '未配置')}\n\n"
-            f"审核通过后你的bot即可接入~\n"
-            f"发送「查询领养状态」查看进度"
-        )
+    ctx['reason'] = user_input
+    await adopt_cmd.send(
+        "请确认是否承诺合规使用云冰祈：\n"
+        "- 不用于违法、违规用途\n"
+        "- 不用于骚扰、广告等行为\n"
+        "- 遵守QQ平台用户协议\n\n"
+        "请回复 我承诺合规使用 确认：",
+        at_sender=True
+    )
+    await adopt_cmd.pause()
 
-        await adopt_cmd.finish(
-            f"领养申请已提交！\n申请编号: {review_id}\n"
-            "WS连接信息已通过私信发送，请注意查收~\n"
-            "请耐心等待管理员审核，发送「查询领养状态」查看进度",
+
+@adopt_cmd.handle()
+async def handle_step_compliance(
+    event: Event,
+    bot: Bot,
+    uid: int = Depends(get_uid)
+):
+    """第四步：确认合规承诺"""
+    user_id = event.get_user_id()
+    user_input = event.get_plaintext().strip()
+    ctx = _apply_context.get(user_id)
+    if not ctx:
+        return
+    if user_input == '退出':
+        _apply_context.pop(user_id, None)
+        await adopt_cmd.finish("已结束领养云冰祈~", at_sender=True)
+
+    if user_input != '我承诺合规使用':
+        await adopt_cmd.reject(
+            "请回复 我承诺合规使用 来确认承诺，或回复 退出 取消申请",
             at_sender=True
         )
+
+    ctx['compliance_commit'] = user_input
+    summary = (
+        "=== 领养申请确认 ===\n"
+        f"主人QQ: {ctx['owner_qq']}\n"
+        f"bot QQ: {ctx['bot_qq']}\n"
+        f"领养理由: {ctx['reason']}\n"
+        f"合规承诺: {ctx['compliance_commit']}\n"
+        f"申请群号: {ctx['group_id']}\n"
+        f"申请时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"==================\n"
+        "回复 确认提交 提交审核，或回复 退出 取消"
+    )
+    await adopt_cmd.send(summary, at_sender=True)
+    await adopt_cmd.pause()
+
+
+@adopt_cmd.handle()
+async def handle_step_confirm(
+    event: Event,
+    bot: Bot,
+    uid: int = Depends(get_uid)
+):
+    """第五步：确认提交"""
+    user_id = event.get_user_id()
+    user_input = event.get_plaintext().strip()
+    ctx = _apply_context.get(user_id)
+    if not ctx:
+        return
+    if user_input == '退出':
+        _apply_context.pop(user_id, None)
+        await adopt_cmd.finish("已结束领养云冰祈~", at_sender=True)
+
+    if user_input != '确认提交':
+        await adopt_cmd.reject(
+            "请回复 确认提交 来提交申请，或回复 退出 取消",
+            at_sender=True
+        )
+
+    now_iso = datetime.now().isoformat()
+    conn = sqlite3.connect(_get_db_path())
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            '''INSERT INTO whitelist_review
+               (owner_qq, bot_qq, reason, compliance_commit, group_id, status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)''',
+            (ctx['owner_qq'], ctx['bot_qq'], ctx['reason'],
+             ctx['compliance_commit'], ctx['group_id'], 'pending', now_iso)
+        )
+        conn.commit()
+        review_id = cursor.lastrowid
+    finally:
+        conn.close()
+
+    _apply_context.pop(user_id, None)
+
+    ws_info = get_ws_info()
+    ws_help = "\n".join(ws_info.get('connection_help', []))
+    await send_private_message(bot, event, uid,
+        f"=== 云冰祈领养申请已提交 ===\n"
+        f"申请编号: {review_id}\n"
+        f"bot QQ: {ctx['bot_qq']}\n\n"
+        f"请先配置你的bot连接：\n{ws_help}\n\n"
+        f"WS地址: {ws_info.get('ws_address', '未配置')}\n\n"
+        f"审核通过后你的bot即可接入~\n"
+        f"发送「查询领养状态」查看进度"
+    )
+
+    await adopt_cmd.finish(
+        f"领养申请已提交！\n申请编号: {review_id}\n"
+        "WS连接信息已通过私信发送，请注意查收~\n"
+        "请耐心等待管理员审核，发送「查询领养状态」查看进度",
+        at_sender=True
+    )
 
 
 # ================== SU审核命令 ==================
