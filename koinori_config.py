@@ -85,8 +85,8 @@ class KoinoribotConfig(BaseModel):
     freeze_sc: int = 950
     
     # 公网白名单模式
-    public_bot: bool = True                 # 是否启用云bot模式
-    permit_bot: list = []                   # 公网bot账号列表（这些bot收到的事件需要检查白名单）
+    public_bot: bool = False                 # 是否启用云bot模式
+    permit_bot: list = []                   # 自己的bot账号列表（如果上面一项为True，则此项必填）
     permit_group: list = []                 # 允许领养云冰祈的群聊
 
     # 超级用户
