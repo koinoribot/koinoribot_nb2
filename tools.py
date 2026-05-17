@@ -20,6 +20,7 @@ from .build_image import BuildImage
 
 from .uid_manager import get_uid as get_unified_uid
 from .uid_manager import get_uid_by_external_id
+from .uid_manager import get_external_ids
 from .nickname import get_user_nickname
 
 # ===== UID 相关 =====
@@ -134,19 +135,41 @@ async def get_sender_nickname(event: Event) -> str:
     return ""
 
 
-def get_user_avatar_url(event: Event) -> str:
-    """获取用户头像 URL"""
+def get_user_avatar_url(event: Event, uid: Optional[int] = None) -> str:
+    """获取用户头像 URL
+
+    对于 QQ-Bot 事件，优先通过 appid+openid 拼接官方头像 URL；
+    若 appid 未配置，则尝试通过 uid 映射查找 OneBot QQ 号构造 qlogo.cn URL；
+    最后回退到 event.author.avatar。
+    """
     if isinstance(event, onebot.Event):
         user_id = event.get_user_id()
-        return f'https://q1.qlogo.cn/g?b=qq&nk={user_id}&s=640'
+        avatar_url = f'https://q1.qlogo.cn/g?b=qq&nk={user_id}&s=640'
+        logger.debug(f"[avatar] OneBot: user_id={user_id}, url={avatar_url}")
+        return avatar_url
     if isinstance(event, qq.Event):
         openid = event.get_user_id()
+        logger.debug(f"[avatar] QQ-Bot: openid={openid}, appid={_qqbot_appid!r}, uid={uid}")
         if _qqbot_appid and openid:
-            return f'https://thirdqq.qlogo.cn/qqapp/{_qqbot_appid}/{openid}/100'
+            avatar_url = f'https://thirdqq.qlogo.cn/qqapp/{_qqbot_appid}/{openid}/100'
+            logger.info(f"[avatar] 官Bot头像 URL (appid+openid): {avatar_url}")
+            return avatar_url
+        logger.debug(f"[avatar] 未走 appid 分支: _qqbot_appid={_qqbot_appid!r}, openid={openid!r}")
+        if uid is not None:
+            external_ids = get_external_ids(uid)
+            onebot_id = external_ids.get("onebot_id")
+            logger.debug(f"[avatar] uid={uid}, external_ids={external_ids}, onebot_id={onebot_id!r}")
+            if onebot_id:
+                avatar_url = f'https://q1.qlogo.cn/g?b=qq&nk={onebot_id}&s=640'
+                logger.info(f"[avatar] 官Bot头像 URL (onebot_id 回退): {avatar_url}")
+                return avatar_url
         if hasattr(event, 'author') and event.author:
             avatar = getattr(event.author, 'avatar', None)
+            logger.debug(f"[avatar] author.avatar={avatar!r}")
             if avatar:
+                logger.info(f"[avatar] 官Bot头像 (event.author 回退): {avatar}")
                 return avatar
+        logger.warning(f"[avatar] 所有分支均未命中，返回空字符串")
     return ''
 
 
