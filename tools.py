@@ -149,23 +149,23 @@ def get_user_avatar_url(event: Event, uid: Optional[int] = None) -> str:
         return avatar_url
     if isinstance(event, qq.Event):
         openid = event.get_user_id()
-        logger.debug(f"[avatar] QQ-Bot: openid={openid}, appid={_qqbot_appid!r}, uid={uid}")
+        logger.info(f"[avatar] QQ-Bot: openid={openid}, appid={_qqbot_appid!r}, uid={uid}")
         if _qqbot_appid and openid:
             avatar_url = f'https://thirdqq.qlogo.cn/qqapp/{_qqbot_appid}/{openid}/100'
             logger.info(f"[avatar] 官Bot头像 URL (appid+openid): {avatar_url}")
             return avatar_url
-        logger.debug(f"[avatar] 未走 appid 分支: _qqbot_appid={_qqbot_appid!r}, openid={openid!r}")
+        logger.info(f"[avatar] 未走 appid 分支: _qqbot_appid={_qqbot_appid!r}, openid={openid!r}")
         if uid is not None:
             external_ids = get_external_ids(uid)
             onebot_id = external_ids.get("onebot_id")
-            logger.debug(f"[avatar] uid={uid}, external_ids={external_ids}, onebot_id={onebot_id!r}")
+            logger.info(f"[avatar] uid={uid}, external_ids={external_ids}, onebot_id={onebot_id!r}")
             if onebot_id:
                 avatar_url = f'https://q1.qlogo.cn/g?b=qq&nk={onebot_id}&s=640'
                 logger.info(f"[avatar] 官Bot头像 URL (onebot_id 回退): {avatar_url}")
                 return avatar_url
         if hasattr(event, 'author') and event.author:
             avatar = getattr(event.author, 'avatar', None)
-            logger.debug(f"[avatar] author.avatar={avatar!r}")
+            logger.info(f"[avatar] author.avatar={avatar!r}")
             if avatar:
                 logger.info(f"[avatar] 官Bot头像 (event.author 回退): {avatar}")
                 return avatar
