@@ -68,7 +68,15 @@ async def init_koinoribot():
         else:
             nonebot.logger.warning("appid.json 中 appid 为空，官Bot用户昵称将显示为默认值")
     except FileNotFoundError:
-        nonebot.logger.warning("未找到 appid.json，官Bot用户昵称将显示为默认值")
+        import json
+        default_data = {
+            "comment": "在此填入你的官方Bot AppID，用于通过 openid 获取用户昵称和头像。不填则官bot用户昵称将显示为默认值。",
+            "appid": "",
+            "openid_api": "https://oiapi.net/api/Openid"
+        }
+        with open(appid_path, "w", encoding="utf-8") as f:
+            json.dump(default_data, f, indent=2, ensure_ascii=False)
+        nonebot.logger.info("已自动创建 appid.json，请填写 appid 和 openid_api")
     except Exception as e:
         nonebot.logger.warning(f"读取 appid.json 失败: {e}，官Bot用户昵称将显示为默认值")
     

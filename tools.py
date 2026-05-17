@@ -20,7 +20,6 @@ from .build_image import BuildImage
 
 from .uid_manager import get_uid as get_unified_uid
 from .uid_manager import get_uid_by_external_id
-from .uid_manager import get_external_ids
 from .nickname import get_user_nickname
 
 # ===== UID 相关 =====
@@ -135,16 +134,15 @@ async def get_sender_nickname(event: Event) -> str:
     return ""
 
 
-def get_user_avatar_url(event: Event, uid: Optional[int] = None) -> str:
+def get_user_avatar_url(event: Event) -> str:
     """获取用户头像 URL"""
     if isinstance(event, onebot.Event):
         user_id = event.get_user_id()
         return f'https://q1.qlogo.cn/g?b=qq&nk={user_id}&s=640'
     if isinstance(event, qq.Event):
-        if uid is not None:
-            external_ids = get_external_ids(uid)
-            if external_ids.get("onebot_id"):
-                return f'https://q1.qlogo.cn/g?b=qq&nk={external_ids["onebot_id"]}&s=640'
+        openid = event.get_user_id()
+        if _qqbot_appid and openid:
+            return f'https://thirdqq.qlogo.cn/qqapp/{_qqbot_appid}/{openid}/100'
         if hasattr(event, 'author') and event.author:
             avatar = getattr(event.author, 'avatar', None)
             if avatar:
