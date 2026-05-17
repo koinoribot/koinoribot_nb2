@@ -1,5 +1,0 @@
-{
-    "_comment": "在此填入你的官方Bot AppID，用于通过 openid 获取用户昵称。不填则官bot用户昵称将显示为默认值。",
-    "appid": "",
-    "openid_api": "https://oiapi.net/api/Openid"
-}
