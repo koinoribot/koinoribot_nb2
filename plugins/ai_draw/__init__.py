@@ -375,7 +375,7 @@ async def do_draw(event: Event, uid: int, wallet: UserWallet, user_text: str) ->
         await draw_cmd.finish(f"画图太频繁啦，请等待 {left}s 后再试~", at_sender=True)
     draw_limiter.start_cd(uid)
 
-    await draw_cmd.send(f"少女画图中…\n已扣除100000金币")
+    await draw_cmd.send(f"少女画图中…\n已扣除{_config['draw_cost']}金币")
 
     try:
         image_bytes = await generate_image(
@@ -422,7 +422,7 @@ async def do_edit(event: Event, uid: int, wallet: UserWallet, user_text: str) ->
     draw_limiter.start_cd(uid)
 
     prompt = user_text.strip()
-    await edit_cmd.send(f"少女修图中…\n已扣除 10万 金币 (剩余 {wallet.gold})")
+    await edit_cmd.send(f"少女修图中…\n已扣除 {_config['draw_cost']} 金币 (剩余 {wallet.gold})")
 
     try:
         image_bytes = await generate_image_edit(
