@@ -72,6 +72,8 @@ DEFAULT_CONFIG = {
     "comment": "AI画图插件配置",
     "deepseek_api_key": "",
     "gpt_image_api_key": "",
+    "gpt_image_api_base_url": "https://www.guanxingyun.com/aimodelapi/v1",
+    "gpt_image_model": "gpt-image-2-all",
     "draw_cost": 100000,
     "daily_limit": 5,
     "enable": True,
@@ -154,7 +156,14 @@ async def on_startup():
     # config.json
     try:
         text = await _async_read_file(CONFIG_PATH)
-        _config.update(json.loads(text))
+        loaded = json.loads(text)
+        # 迁移：补充 DEFAULT_CONFIG 中存在但 loaded 中缺失的键
+        missing = {k: v for k, v in DEFAULT_CONFIG.items() if k not in loaded}
+        if missing:
+            loaded.update(missing)
+            await _async_write_file(CONFIG_PATH, json.dumps(loaded, indent=2, ensure_ascii=False))
+            logger.info(f"ai_draw config.json 已迁移，补充了缺失的键: {list(missing.keys())}")
+        _config.update(loaded)
         logger.info(
             "ai_draw config.json 加载成功 "
             f"(deepseek_key={'***' if _config.get('deepseek_api_key') else '未配置'}, "
@@ -287,12 +296,12 @@ async def generate_image(
     api_key: str, prompt: str, size: str = "auto"
 ) -> bytes:
     """调用 GPT-Image-2 文本生图"""
-    url = "https://www.guanxingyun.com/aimodelapi/v1/images/generations"
+    url = f"{_config['gpt_image_api_base_url']}/images/generations"
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {api_key}",
     }
-    payload = {"model": "gpt-image-2-all", "prompt": prompt, "size": size}
+    payload = {"model": _config["gpt_image_model"], "prompt": prompt, "size": size}
 
     async with aiohttp.ClientSession() as session:
         async with session.post(url, headers=headers, json=payload, timeout=120) as resp:
@@ -309,10 +318,10 @@ async def generate_image_edit(
     api_key: str, prompt: str, image_bytes: bytes, size: str = "auto"
 ) -> bytes:
     """调用 GPT-Image-2 图片编辑（含参考图）"""
-    url = "https://www.guanxingyun.com/aimodelapi/v1/images/edits"
+    url = f"{_config['gpt_image_api_base_url']}/images/edits"
 
     form_data = aiohttp.FormData()
-    form_data.add_field("model", "gpt-image-2-all")
+    form_data.add_field("model", _config["gpt_image_model"])
     form_data.add_field("prompt", prompt)
     form_data.add_field("size", size)
     form_data.add_field("image", image_bytes, filename="reference.png", content_type="image/png")
