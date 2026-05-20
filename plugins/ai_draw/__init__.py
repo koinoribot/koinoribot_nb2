@@ -304,7 +304,7 @@ async def generate_image(
     payload = {"model": _config["gpt_image_model"], "prompt": prompt, "size": size}
 
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, headers=headers, json=payload, timeout=120) as resp:
+        async with session.post(url, headers=headers, json=payload, timeout=180) as resp:
             if resp.status != 200:
                 text = await resp.text()
                 logger.error(f"GPT-Image-2 API error: {resp.status} {text}")
@@ -331,7 +331,7 @@ async def generate_image_edit(
     }
 
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, headers=headers, data=form_data, timeout=120) as resp:
+        async with session.post(url, headers=headers, data=form_data, timeout=180) as resp:
             if resp.status != 200:
                 text = await resp.text()
                 logger.error(f"GPT-Image-2 Edit API error: {resp.status} {text}")
@@ -389,7 +389,7 @@ async def do_draw(event: Event, uid: int, wallet: UserWallet, user_text: str) ->
     except Exception as e:
         wallet.gold += _config["draw_cost"]
         logger.error(f"画图异常: {type(e).__name__}: {e}")
-        await draw_cmd.finish(f"画图出错了: {type(e).__name__}\n已退还 10万 金币。", at_sender=True)
+        await draw_cmd.finish(f"画图出错了: {type(e).__name__}\n已退还金币。", at_sender=True)
     else:
         await draw_cmd.finish(image_msg)
 
@@ -432,11 +432,11 @@ async def do_edit(event: Event, uid: int, wallet: UserWallet, user_text: str) ->
     except RuntimeError as e:
         wallet.gold += _config["draw_cost"]
         logger.error(f"修图失败: {e}")
-        await edit_cmd.finish(f"修图失败: {e}\n已退还 10万 金币。", at_sender=True)
+        await edit_cmd.finish(f"修图失败: {e}\n已退还金币。", at_sender=True)
     except Exception as e:
         wallet.gold += _config["draw_cost"]
         logger.error(f"修图异常: {type(e).__name__}: {e}")
-        await edit_cmd.finish(f"修图出错了: {type(e).__name__}\n已退还 10万 金币。", at_sender=True)
+        await edit_cmd.finish(f"修图出错了: {type(e).__name__}\n已退还金币。", at_sender=True)
     else:
         await edit_cmd.finish(image_msg)
 
