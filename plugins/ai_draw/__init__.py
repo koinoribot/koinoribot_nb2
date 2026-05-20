@@ -457,6 +457,8 @@ async def handle_draw(
         await draw_cmd.finish("未配置 DeepSeek API Key，请联系主人配置~", at_sender=True)
     if not cfg.get("gpt_image_api_key"):
         await draw_cmd.finish("未配置 GPT-Image-2 API Key，请联系主人配置~", at_sender=True)
+    if is_qqbot(event):
+        await draw_cmd.finish("AI画图功能暂不支持QQbot~", at_sender=True)
 
     user_text = args.extract_plain_text().strip()
     if not user_text:
@@ -478,6 +480,8 @@ async def handle_edit(
         await edit_cmd.finish("未配置 DeepSeek API Key，请联系主人配置~", at_sender=True)
     if not cfg.get("gpt_image_api_key"):
         await edit_cmd.finish("未配置 GPT-Image-2 API Key，请联系主人配置~", at_sender=True)
+    if is_qqbot(event):
+        await edit_cmd.finish("AI修图功能暂不支持QQbot~", at_sender=True)
 
     user_text = args.extract_plain_text().strip()
     await do_edit(event, uid, wallet, user_text)
