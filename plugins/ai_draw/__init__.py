@@ -340,7 +340,7 @@ async def check_quota_and_pay(uid: int, wallet: UserWallet, cmd) -> bool:
     if get_su_level(uid) != SU_LEVEL_CONTRIBUTOR:
         ok = await check_and_increment_daily_limit(uid)
         if not ok:
-            await cmd.finish(f"你一天只能了 {_config['daily_limit']} 张图，明天再来吧~", at_sender=True)
+            await cmd.finish(f"你一天只能画 {_config['daily_limit']} 张图，明天再来吧~", at_sender=True)
             return False
 
     if wallet.gold < _config["draw_cost"]:
