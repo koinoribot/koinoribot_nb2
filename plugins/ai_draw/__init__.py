@@ -389,9 +389,9 @@ async def do_draw(event: Event, uid: int, wallet: UserWallet, user_text: str) ->
     except Exception as e:
         wallet.gold += _config["draw_cost"]
         logger.error(f"画图异常: {type(e).__name__}: {e}")
-        await draw_cmd.finish(f"画图出错了: {type(e).__name__}\n已退还金币。", at_sender=True)
+        await draw_cmd.finish(f"画图出错了: {e}\n已退还金币。", at_sender=True)
     else:
-        await draw_cmd.finish(image_msg)
+        await draw_cmd.finish(image_msg, at_sender=True)
 
 
 async def do_edit(event: Event, uid: int, wallet: UserWallet, user_text: str) -> None:
@@ -436,9 +436,9 @@ async def do_edit(event: Event, uid: int, wallet: UserWallet, user_text: str) ->
     except Exception as e:
         wallet.gold += _config["draw_cost"]
         logger.error(f"修图异常: {type(e).__name__}: {e}")
-        await edit_cmd.finish(f"修图出错了: {type(e).__name__}\n已退还金币。", at_sender=True)
+        await edit_cmd.finish(f"修图出错了: {e}\n已退还金币。", at_sender=True)
     else:
-        await edit_cmd.finish(image_msg)
+        await edit_cmd.finish(image_msg, at_sender=True)
 
 
 # ═══════════════ 命令入口 ═══════════════
