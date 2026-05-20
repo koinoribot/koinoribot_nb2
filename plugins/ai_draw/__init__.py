@@ -370,9 +370,8 @@ async def do_draw(event: Event, uid: int, wallet: UserWallet, user_text: str) ->
     await draw_cmd.send(f"少女画图中…\n已扣除100000金币")
 
     try:
-        english_prompt = await translate_prompt(_config["deepseek_api_key"], user_text)
         image_bytes = await generate_image(
-            _config["gpt_image_api_key"], english_prompt
+            _config["gpt_image_api_key"], user_text
         )
         image_msg = build_image_msg(event, image_bytes)
     except RuntimeError as e:
@@ -418,9 +417,8 @@ async def do_edit(event: Event, uid: int, wallet: UserWallet, user_text: str) ->
     await edit_cmd.send(f"少女修图中…\n已扣除 10万 金币 (剩余 {wallet.gold})")
 
     try:
-        english_prompt = await translate_prompt(_config["deepseek_api_key"], prompt)
         image_bytes = await generate_image_edit(
-            _config["gpt_image_api_key"], english_prompt, ref_image
+            _config["gpt_image_api_key"], prompt, ref_image
         )
         image_msg = build_image_msg(event, image_bytes)
     except RuntimeError as e:
