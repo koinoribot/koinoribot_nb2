@@ -281,10 +281,13 @@ async def _download_result(session: aiohttp.ClientSession, data: dict) -> bytes:
         image_url = data.get("url") or data.get("image_url")
 
     if image_url:
-        async with session.get(image_url, timeout=60) as img_resp:
-            if img_resp.status != 200:
-                raise RuntimeError(f"下载图像失败: {img_resp.status}")
-            return await img_resp.read()
+        try:
+            async with session.get(image_url, timeout=300) as img_resp:
+                if img_resp.status != 200:
+                    raise RuntimeError(f"下载图像失败: {img_resp.status}")
+                return await img_resp.read()
+        except Exception as e:
+            raise RuntimeError(f"下载生成的图片时出错（图片可能已生成，请稍后重试）: {e}")
 
     b64 = None
     if "data" in data and len(data["data"]) > 0:
@@ -312,10 +315,16 @@ async def generate_image(
     async with aiohttp.ClientSession() as session:
         async with session.post(url, headers=headers, json=payload, timeout=300) as resp:
             if resp.status != 200:
-                text = await resp.text()
+                try:
+                    text = await resp.text()
+                except Exception:
+                    text = "(无法读取响应体)"
                 logger.error(f"GPT-Image-2 API error: {resp.status} {text}")
                 raise RuntimeError(f"GPT-Image-2 API 返回错误: {resp.status}\n{text}")
-            data = await resp.json()
+            try:
+                data = await resp.json()
+            except Exception as e:
+                raise RuntimeError(f"GPT-Image-2 响应解析失败（图片可能已生成）: {e}")
             logger.debug(f"GPT-Image-2 response: {json.dumps(data, ensure_ascii=False)[:500]}")
             return await _download_result(session, data)
 
@@ -339,10 +348,16 @@ async def generate_image_edit(
     async with aiohttp.ClientSession() as session:
         async with session.post(url, headers=headers, data=form_data, timeout=300) as resp:
             if resp.status != 200:
-                text = await resp.text()
+                try:
+                    text = await resp.text()
+                except Exception:
+                    text = "(无法读取响应体)"
                 logger.error(f"GPT-Image-2 Edit API error: {resp.status} {text}")
                 raise RuntimeError(f"GPT-Image-2 图片编辑 API 返回错误: {resp.status}\n{text}")
-            data = await resp.json()
+            try:
+                data = await resp.json()
+            except Exception as e:
+                raise RuntimeError(f"GPT-Image-2 响应解析失败（图片可能已生成）: {e}")
             logger.debug(f"GPT-Image-2 Edit response: {json.dumps(data, ensure_ascii=False)[:500]}")
             return await _download_result(session, data)
 
