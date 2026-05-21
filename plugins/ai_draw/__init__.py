@@ -17,6 +17,7 @@ import aiohttp
 from nonebot import on_command, get_driver
 from nonebot.adapters import Event, Bot
 from nonebot.adapters.onebot.v11 import Message
+from nonebot.adapters.onebot.v11.exception import ActionFailed
 from nonebot.log import logger
 from nonebot.params import CommandArg, Depends
 from nonebot.plugin import PluginMetadata
@@ -412,7 +413,11 @@ async def do_draw(event: Event, uid: int, wallet: UserWallet, user_text: str) ->
         logger.error(f"画图异常: {type(e).__name__}: {e}")
         await draw_cmd.finish(f"画图出错了: {e}\n已退还金币。", at_sender=True)
     else:
-        await draw_cmd.finish(image_msg, at_sender=True)
+        try:
+            await draw_cmd.send(image_msg, at_sender=True)
+        except ActionFailed:
+            logger.warning("发送图片超时，但图片可能已送达")
+        await draw_cmd.finish()
 
 
 async def do_edit(event: Event, uid: int, wallet: UserWallet, user_text: str) -> None:
@@ -459,7 +464,11 @@ async def do_edit(event: Event, uid: int, wallet: UserWallet, user_text: str) ->
         logger.error(f"修图异常: {type(e).__name__}: {e}")
         await edit_cmd.finish(f"修图出错了: {e}\n已退还金币。", at_sender=True)
     else:
-        await edit_cmd.finish(image_msg, at_sender=True)
+        try:
+            await edit_cmd.send(image_msg, at_sender=True)
+        except ActionFailed:
+            logger.warning("修图发送图片超时，但图片可能已送达")
+        await edit_cmd.finish()
 
 
 # ═══════════════ 命令入口 ═══════════════
