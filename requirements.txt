@@ -1,5 +1,5 @@
 aiohttp>=3.8.0
-Pillow~=9.4.0
+Pillow~=11.2.1
 matplotlib~=3.10.8
 numpy~=1.23.0
 scikit-image~=0.22.0

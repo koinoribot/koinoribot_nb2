@@ -305,7 +305,8 @@ class BuildImage:
         参数：
             :param msg: 文字内容
         """
-        return self.font.getsize(msg)
+        bbox = self.font.getbbox(msg)
+        return (bbox[2] - bbox[0], bbox[3] - bbox[1])
 
 
     def getsize_multiline(self, msg: str) -> Tuple[int, int]:
@@ -315,7 +316,8 @@ class BuildImage:
         参数：
             :param msg: 文字内容
         """
-        return self.font.getsize_multiline(msg)
+        bbox = self.font.getmultilinebbox(msg)
+        return (bbox[2] - bbox[0], bbox[3] - bbox[1])
 
 
     async def apoint(
@@ -599,7 +601,7 @@ class BuildImage:
         参数：
             :param word: 文本内容
         """
-        return self.font.getsize(word)[0] > self.w
+        return self.font.getlength(word) > self.w
 
     async def atransparent(self, alpha_ratio: float = 1, n: int = 0):
         """
