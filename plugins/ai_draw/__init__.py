@@ -427,8 +427,8 @@ async def handle_draw(
     args: Message = CommandArg(),
     uid: int = Depends(get_uid),
 ):
-    if not koinori_config.deepseek_api_key:
-        await draw_cmd.finish("未配置 DeepSeek API Key，请联系主人配置~", at_sender=True)
+#    if not koinori_config.deepseek_api_key:
+#        await draw_cmd.finish("未配置 DeepSeek API Key，请联系主人配置~", at_sender=True)
     if not koinori_config.gpt_image_api_key:
         await draw_cmd.finish("未配置 GPT-Image-2 API Key，请联系主人配置~", at_sender=True)
     if is_qqbot(event):
