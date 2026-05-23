@@ -294,7 +294,7 @@ async def as_login_v3(uid: int, username: str, qqname: str, nick_flag: int, avat
     border = 0
     is_bold = False
 
-    custom_bg_path = os.path.join(srcpath, 'customize', f'{uid}.png')
+    custom_bg_path = os.path.join(srcpath, 'customize', f'{uid}.jpg')
     has_custom_bg = os.path.exists(custom_bg_path)
 
     if has_custom_bg:
@@ -723,14 +723,14 @@ async def dl_save_image(url: str, uid: int):
                 resample_method = Image.ANTIALIAS
             img = img.resize((960, 540), resample_method)
             
-            save_path = os.path.join(srcpath, f'customize/{uid}.png')
+            save_path = os.path.join(srcpath, f'customize/{uid}.jpg')
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            img.save(save_path, format="PNG")
+            img.save(save_path, format="JPEG", quality=95)
 
 
 def del_custom_bg(uid: int):
     """删除自定义背景图"""
     srcpath = get_src_path()
-    custom_path = os.path.join(srcpath, f'customize/{uid}.png')
+    custom_path = os.path.join(srcpath, f'customize/{uid}.jpg')
     if os.path.exists(custom_path):
         os.remove(custom_path)
