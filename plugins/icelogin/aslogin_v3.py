@@ -30,17 +30,15 @@ debug_login_flag = 0
 save_image_mode = 0
 debug_background = 'Background2.jpg'
 
-# 背景图列表
-backgroundList = [
-    'Background1.jpg', 'Background2.jpg', 'Background3.jpg', 'Background4.jpg', 'Background5.jpg',
-    'Background6.jpg', 'Background7.jpg', 'Background8.jpg', 'Background9.jpg', 'Background10.jpg',
-    'Background11.jpg', 'Background12.jpg', 'Background13.jpg', 'Background14.jpg'
-]
-
-hoshi_bg_list = [
-    'Background-hoshi-1.jpg', 'Background-hoshi-2.jpg', 'Background-hoshi-3.jpg',
-    'Background-hoshi-4.jpg', 'Background-hoshi-5.jpg'
-]
+def _get_background_images(srcpath: str) -> list:
+    """扫描 background 目录获取所有背景图片"""
+    bg_dir = os.path.join(srcpath, 'background')
+    if not os.path.isdir(bg_dir):
+        return []
+    exts = {'.jpg', '.jpeg', '.png'}
+    files = [f for f in os.listdir(bg_dir)
+             if os.path.splitext(f)[1].lower() in exts]
+    return files
 
 extra_bg_list = ['Background_extra.jpg']
 
@@ -267,16 +265,6 @@ async def as_login_v3(uid: int, username: str, qqname: str, nick_flag: int, avat
     
     # 签到奖励
     if login_flag == 0:
-        rdint = random.randint(1, 11)
-        user_bg = money.get_user_background(uid)
-        if user_bg.get('mode', 0) != 2:
-            if rdint >= 8:
-                money.set_user_background(uid, random.choice(hoshi_bg_list))
-                money.set_user_bg_mode(uid, 1)
-            else:
-                money.set_user_background(uid, random.choice(backgroundList))
-                money.set_user_bg_mode(uid, 0)
-        
         num = rp * 5 + birth_flag * 2400 + event_flag * 1600 + star_add
         gold += birth_flag * 5000 + event_flag * 3600 + gold_add
         money.increase_user_money(uid, "starstone", num)
@@ -302,19 +290,17 @@ async def as_login_v3(uid: int, username: str, qqname: str, nick_flag: int, avat
         login_flag = 0
     
     # ====== 开始绘图 ======
-    user_bg = money.get_user_background(uid)
-    
-    # 背景
+    # 背景：优先查找 customize/{uid}.png，否则从 background/ 随机选取
     border = 0
     is_bold = False
-    
-    if user_bg.get('mode', 0) == 2:
+
+    custom_bg_path = os.path.join(srcpath, 'customize', f'{uid}.png')
+    has_custom_bg = os.path.exists(custom_bg_path)
+
+    if has_custom_bg:
         border = 2
         is_bold = True
-        user_bg_choose = f"customize/{user_bg.get('custom', 'default.jpg')}"
-        imageFile = os.path.join(srcpath, user_bg_choose)
-        if not os.path.exists(imageFile):
-            imageFile = os.path.join(srcpath, random.choice(backgroundList))
+        imageFile = custom_bg_path
         bg = BuildImage(0, 0, font_size=30, background=os.path.join(srcpath, 'whiteboard.jpg'), font='HYShiGuangTiW_0.ttf')
         try:
             cstm_bg = BuildImage(0, 0, font_size=30, background=imageFile, font='HYShiGuangTiW_0.ttf')
@@ -330,19 +316,14 @@ async def as_login_v3(uid: int, username: str, qqname: str, nick_flag: int, avat
             mask = BuildImage(0, 0, font_size=30, background=mask_path, font='HYShiGuangTiW_0.ttf')
             bg.paste(mask, (0, 0), True)
     else:
-        if user_bg.get('default'):
-            user_bg_choose = user_bg['default']
-        else:
-            user_bg_choose = random.choice(backgroundList)
-            money.set_user_background(uid, user_bg_choose)
-            money.set_user_bg_mode(uid, 0)
-        
+        bg_list = _get_background_images(srcpath)
         if uid == 80000000:
             user_bg_choose = extra_bg_list[0]
-        
-        imageFile = os.path.join(srcpath, user_bg_choose)
+        else:
+            user_bg_choose = random.choice(bg_list) if bg_list else extra_bg_list[0]
+        imageFile = os.path.join(srcpath, 'background', user_bg_choose)
         if not os.path.exists(imageFile):
-            imageFile = os.path.join(srcpath, backgroundList[0])
+            imageFile = os.path.join(srcpath, 'background', bg_list[0]) if bg_list else None
         bg = BuildImage(0, 0, font_size=30, background=imageFile, font='HYShiGuangTiW_0.ttf')
     
     # 头像
@@ -485,13 +466,11 @@ async def as_login_v3(uid: int, username: str, qqname: str, nick_flag: int, avat
         bg.text((618, 338), total_get_msg, (77, 83, 149), stroke_width=2, stroke_fill=(255, 255, 255, 1))
     else:
         # 已签到标记
-        if user_bg.get('mode', 0) == 2:
+        if has_custom_bg:
             loginFlagIconFile = os.path.join(srcpath, 'login_flag_custom.png')
-        elif user_bg.get('mode', 0) == 1:
-            loginFlagIconFile = os.path.join(srcpath, 'login_flag_hoshi.png')
         else:
             loginFlagIconFile = os.path.join(srcpath, 'login_flag.png')
-        
+
         if os.path.exists(loginFlagIconFile):
             login_flag_img = BuildImage(0, 0, background=loginFlagIconFile)
             bg.paste(login_flag_img, (373, 174), True)
@@ -744,23 +723,14 @@ async def dl_save_image(url: str, uid: int):
                 resample_method = Image.ANTIALIAS
             img = img.resize((960, 540), resample_method)
             
-            save_path = os.path.join(srcpath, f'customize/{uid}.jpg')
+            save_path = os.path.join(srcpath, f'customize/{uid}.png')
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            img.save(save_path, format="JPEG", quality=95)
-            
-    money.set_user_background(uid, f'{uid}.jpg', 'custom')
-    money.set_user_bg_mode(uid, mode=2)
+            img.save(save_path, format="PNG")
 
 
 def del_custom_bg(uid: int):
     """删除自定义背景图"""
     srcpath = get_src_path()
-    custom_path = os.path.join(srcpath, f'customize/{uid}.jpg')
+    custom_path = os.path.join(srcpath, f'customize/{uid}.png')
     if os.path.exists(custom_path):
         os.remove(custom_path)
-    money.set_user_background(uid, '', 'custom')
-    user_bg = money.get_user_background(uid)
-    if 'hoshi' in user_bg.get('default', ''):
-        money.set_user_bg_mode(uid, mode=1)
-    else:
-        money.set_user_bg_mode(uid, mode=0)
