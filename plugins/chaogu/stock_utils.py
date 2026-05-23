@@ -438,7 +438,6 @@ def _resolve_cjk_font() -> fm.FontProperties:
 
     for path in _known_paths:
         if os.path.isfile(path):
-            logger.info(f"[stock_utils] Found CJK font: {path}")
             fm.fontManager.addfont(path)
             prop = fm.FontProperties(fname=path)
             return prop
@@ -479,7 +478,6 @@ def generate_stock_chart(stock_name: str, history: List[tuple], stock_data: Dict
         return None
 
     try:
-        logger.info(f"[stock_utils] Generating chart for {stock_name} using Matplotlib...")
 
         timestamps, prices = zip(*history)
         dates = [datetime.fromtimestamp(ts) for ts in timestamps]
@@ -555,7 +553,6 @@ def generate_stock_chart(stock_name: str, history: List[tuple], stock_data: Dict
         canvas.print_png(buf)
         buf.seek(0)
         
-        logger.info(f"[stock_utils] Chart generated successfully")
         return buf
 
     except Exception as e:
