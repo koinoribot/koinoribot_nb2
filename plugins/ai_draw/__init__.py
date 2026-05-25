@@ -344,17 +344,30 @@ async def check_quota_and_pay(uid: int, cmd) -> bool:
 
 # ═══════════════ 画图处理 ═══════════════
 
-async def do_draw(event: Event, uid: int, user_text: str) -> None:
+async def ensure_draw_available(event: Event, uid: int, cmd) -> None:
+    """检查文本生图功能是否可用。"""
+    if not koinori_config.gpt_image_api_key:
+        await cmd.finish("未配置 GPT-Image-2 API Key，请联系主人配置~", at_sender=True)
+    if is_qqbot(event):
+        await cmd.finish("AI画图功能暂不支持QQbot~", at_sender=True)
+    if not koinori_config.ai_draw_enable and get_su_level(uid) != SU_LEVEL_CONTRIBUTOR:
+        await cmd.finish("AI画图功能维护中，暂时不可用~", at_sender=True)
+
+
+async def do_draw(event: Event, uid: int, user_text: str, cmd=None, progress_text: str | None = None) -> None:
     """执行文本生图"""
-    if not await check_quota_and_pay(uid, draw_cmd):
+    if cmd is None:
+        cmd = draw_cmd
+
+    if not await check_quota_and_pay(uid, cmd):
         return
 
     if not draw_limiter.check(uid):
         left = round(draw_limiter.left_time(uid))
-        await draw_cmd.finish(f"画图太频繁啦，请等待 {left}s 后再试~", at_sender=True)
+        await cmd.finish(f"画图太频繁啦，请等待 {left}s 后再试~", at_sender=True)
     draw_limiter.start_cd(uid)
 
-    await draw_cmd.send(f"少女画图中…\n已扣除{koinori_config.draw_cost}金币")
+    await cmd.send(progress_text or f"少女画图中…\n已扣除{koinori_config.draw_cost}金币")
 
     try:
         image_bytes = await generate_image(
@@ -364,17 +377,17 @@ async def do_draw(event: Event, uid: int, user_text: str) -> None:
     except RuntimeError as e:
         money.increase_user_money(uid, "gold", koinori_config.draw_cost)
         logger.error(f"画图失败: {e}")
-        await draw_cmd.finish(f"画图失败: {e}\n已退还金币。", at_sender=True)
+        await cmd.finish(f"画图失败: {e}\n已退还金币。", at_sender=True)
     except Exception as e:
         money.increase_user_money(uid, "gold", koinori_config.draw_cost)
         logger.error(f"画图异常: {type(e).__name__}: {e}")
-        await draw_cmd.finish(f"画图出错了: {e}\n已退还金币。", at_sender=True)
+        await cmd.finish(f"画图出错了: {e}\n已退还金币。", at_sender=True)
     else:
         try:
-            await draw_cmd.send(image_msg, at_sender=True)
+            await cmd.send(image_msg, at_sender=True)
         except ActionFailed:
             logger.warning("发送图片超时，但图片可能已送达")
-        await draw_cmd.finish()
+        await cmd.finish()
 
 
 async def do_edit(event: Event, uid: int, user_text: str) -> None:
@@ -440,16 +453,11 @@ async def handle_draw(
 ):
 #    if not koinori_config.deepseek_api_key:
 #        await draw_cmd.finish("未配置 DeepSeek API Key，请联系主人配置~", at_sender=True)
-    if not koinori_config.gpt_image_api_key:
-        await draw_cmd.finish("未配置 GPT-Image-2 API Key，请联系主人配置~", at_sender=True)
-    if is_qqbot(event):
-        await draw_cmd.finish("AI画图功能暂不支持QQbot~", at_sender=True)
-    if not koinori_config.ai_draw_enable and get_su_level(uid) != SU_LEVEL_CONTRIBUTOR:
-        await draw_cmd.finish("AI画图功能维护中，暂时不可用~", at_sender=True)
+    await ensure_draw_available(event, uid, draw_cmd)
 
     user_text = args.extract_plain_text().strip()
     if not user_text:
-        await draw_cmd.finish("请输入画图描述，例如: ml冰祈画图 一只可爱的猫", at_sender=True)
+        await draw_cmd.finish("请输入画图描述，例如: 冰祈画图 一只可爱的猫", at_sender=True)
 
     await do_draw(event, uid, user_text)
 
