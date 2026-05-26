@@ -25,6 +25,7 @@ __plugin_meta__ = PluginMetadata(
 
 IMAGE_CMD_TEXT = "查看今日人设图"
 IMAGE_REMINDER = f"发送「{IMAGE_CMD_TEXT}」可以生成今日人设图（需要{koinori_config.draw_cost}金币）。"
+IMAGE_PROMPT_NAME = ""
 
 OTHER_TRIGGERS = (
     "今天你是什么少女",
@@ -146,15 +147,16 @@ async def handle_my_shaojo_image(
     await ensure_draw_available(event, uid, my_shaojo_image_cmd)
 
     name = await _sender_name(event)
-    profile = _format_profile(uid, name)
-    prompt = _build_image_prompt(profile)
+    display_profile = _format_profile(uid, name)
+    prompt_profile = _format_profile(uid, IMAGE_PROMPT_NAME)
+    prompt = _build_image_prompt(prompt_profile)
     await do_draw(
         event,
         uid,
         prompt,
         cmd=my_shaojo_image_cmd,
         progress_text=f"今日人设图生成中…\n已扣除{koinori_config.draw_cost}金币",
-        success_text=f"少女人设：\n{profile}",
+        success_text=f"人设：\n{display_profile}",
     )
 
 
