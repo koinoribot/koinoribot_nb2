@@ -606,7 +606,7 @@ async def handle_energy(event: Event, bot: Bot, uid: int = Depends(get_uid)):
 
 
 # ===== 丢玩具球 =====
-energy_cmd = on_command("丟玩具球", priority=5, block=True)
+energy_cmd = on_command("丟玩具球", aliases={"丢玩具球"}, priority=5, block=True)
 @energy_cmd.handle()
 async def handle_throw_ball(event: Event, bot: Bot, uid: int = Depends(get_uid)):
     if not await use_user_item(uid, "玩具球"):
