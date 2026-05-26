@@ -130,6 +130,13 @@ def _build_image_prompt(profile: str) -> str:
     )
 
 
+def _strip_image_prompt_subject(profile: str) -> str:
+    prefix = "动漫里的，"
+    if profile.startswith(prefix):
+        return profile.removeprefix(prefix)
+    return profile
+
+
 @my_shaojo_cmd.handle()
 async def handle_my_shaojo(
     event: Event,
@@ -148,7 +155,7 @@ async def handle_my_shaojo_image(
 
     name = await _sender_name(event)
     display_profile = _format_profile(uid, name)
-    prompt_profile = _format_profile(uid, IMAGE_PROMPT_NAME)
+    prompt_profile = _strip_image_prompt_subject(_format_profile(uid, IMAGE_PROMPT_NAME))
     prompt = _build_image_prompt(prompt_profile)
     await do_draw(
         event,
