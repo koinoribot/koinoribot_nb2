@@ -10,6 +10,7 @@ from nonebot.rule import Rule
 import re
 
 from ...koinori_config import config as koinori_config
+from ...nickname import get_user_nickname
 from ...tools import get_sender_nickname, get_uid
 from ...uid_manager import get_uid as get_unified_uid
 from ..ai_draw import do_draw, ensure_draw_available, get_free_draw_count
@@ -54,7 +55,11 @@ async def _is_other_shaojo(event: Event) -> bool:
 other_shaojo_cmd = on_message(rule=Rule(_is_other_shaojo), priority=5, block=True)
 
 
-async def _sender_name(event: Event) -> str:
+async def _sender_name(event: Event, uid: int) -> str:
+    custom_nickname = get_user_nickname(uid)
+    if custom_nickname:
+        return custom_nickname
+
     if isinstance(event, MessageEvent) and event.sender:
         return event.sender.card or event.sender.nickname or "你"
     return await get_sender_nickname(event) or "你"
@@ -98,7 +103,11 @@ def _extract_at_targets(event: Event) -> list[tuple[int, str, str]]:
     return deduped
 
 
-async def _target_name(bot: Bot, event: Event, target_external_id: str) -> str:
+async def _target_name(bot: Bot, event: Event, target_uid: int, target_external_id: str,) -> str:
+    custom_nickname = get_user_nickname(target_uid)
+    if custom_nickname:
+        return custom_nickname
+
     if isinstance(bot, OneBotBot) and isinstance(event, GroupMessageEvent):
         try:
             info = await bot.get_group_member_info(
@@ -150,7 +159,7 @@ async def handle_my_shaojo(
     event: Event,
     uid: int = Depends(get_uid),
 ) -> None:
-    name = await _sender_name(event)
+    name = await _sender_name(event, uid)
     reminder = await _build_image_reminder(uid)
     await my_shaojo_cmd.finish(_format_profile(uid, name, reminder=reminder))
 
@@ -162,7 +171,7 @@ async def handle_my_shaojo_image(
 ) -> None:
     await ensure_draw_available(event, uid, my_shaojo_image_cmd)
 
-    name = await _sender_name(event)
+    name = await _sender_name(event, uid)
     display_profile = _format_profile(uid, name)
     prompt_profile = _strip_image_prompt_subject(_format_profile(uid, IMAGE_PROMPT_NAME))
     prompt = _build_image_prompt(prompt_profile)
@@ -186,7 +195,7 @@ async def handle_other_shaojo(bot: Bot, event: Event) -> None:
         if target_external_id == str(bot.self_id):
             msg = BOT_SHOUJO
         else:
-            name = await _target_name(bot, event, target_external_id)
+            name = await _target_name(bot, event, target_uid, target_external_id)
             msg = _format_profile(target_uid, name)
 
         try:
