@@ -517,6 +517,7 @@ async def do_draw(
     cmd=None,
     progress_text: str | None = None,
     success_text: str | None = None,
+    size: str = "auto",
 ) -> None:
     """执行文本生图"""
     if cmd is None:
@@ -545,7 +546,7 @@ async def do_draw(
 
     try:
         image_bytes = await generate_image(
-            koinori_config.gpt_image_api_key, user_text
+            koinori_config.gpt_image_api_key, user_text, size=size
         )
         image_msg = build_image_msg(event, image_bytes)
     except RuntimeError as e:
