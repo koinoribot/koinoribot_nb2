@@ -640,7 +640,7 @@ _apply_context: Dict[str, dict] = {}  # {user_id: {step, owner_qq, bot_qq, reaso
 
 # ================== 领养云冰祈 — 多轮对话 ==================
 
-adopt_cmd = on_command("领养云冰祈", priority=5, block=True)
+adopt_cmd = on_command("领养云冰祈", aliases={"云冰祈"}, priority=5, block=True)
 
 
 @adopt_cmd.handle()
