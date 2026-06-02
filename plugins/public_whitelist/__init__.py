@@ -11,9 +11,11 @@
 import json
 import sqlite3
 from datetime import datetime
+from html import escape
 from pathlib import Path
 from typing import Optional, Dict, Set, List
 
+from aiohttp import web
 import nonebot.adapters.onebot.v11 as onebot_adapter
 from nonebot import on_command, get_driver
 from nonebot.plugin import PluginMetadata
@@ -79,6 +81,11 @@ def _init_tables():
 
 _cache_owner_to_bot: Dict[str, str] = {}
 _cache_bot_set: Set[str] = set()
+
+WHITELIST_WEB_HOST = "0.0.0.0"
+WHITELIST_WEB_PORT = 8888
+_whitelist_web_runner: Optional[web.AppRunner] = None
+_whitelist_web_site: Optional[web.TCPSite] = None
 
 
 def load_cache():
@@ -161,6 +168,353 @@ def get_ws_info() -> dict:
             f"{ws_address}",
         ],
     }
+
+
+# ================== 白名单WS查询网页 ==================
+
+def _is_whitelist_pair(owner_qq: str, bot_qq: str) -> bool:
+    """校验主人QQ和bot QQ是否为同一条白名单绑定关系。"""
+    return _cache_owner_to_bot.get(owner_qq) == bot_qq
+
+
+def _get_pending_review_id(owner_qq: str, bot_qq: str) -> Optional[int]:
+    """查询是否存在待审核的同一组领养申请。"""
+    conn = sqlite3.connect(_get_db_path())
+    try:
+        row = conn.execute(
+            '''SELECT id FROM whitelist_review
+               WHERE owner_qq = ? AND bot_qq = ? AND status = ?
+               ORDER BY id DESC
+               LIMIT 1''',
+            (owner_qq, bot_qq, 'pending')
+        ).fetchone()
+        return int(row[0]) if row else None
+    finally:
+        conn.close()
+
+
+def _render_whitelist_page(
+    owner_qq: str = "",
+    bot_qq: str = "",
+    result_html: str = "",
+) -> str:
+    safe_owner = escape(owner_qq)
+    safe_bot = escape(bot_qq)
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>云冰祈 WS 查询</title>
+  <style>
+    * {{
+      box-sizing: border-box;
+    }}
+    body {{
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+      color: #202124;
+      background: #f6f5f2;
+    }}
+    main {{
+      width: min(760px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 56px 0;
+    }}
+    h1 {{
+      margin: 0 0 8px;
+      font-size: 32px;
+      line-height: 1.2;
+      font-weight: 700;
+    }}
+    .subtitle {{
+      margin: 0 0 28px;
+      color: #5f6368;
+      line-height: 1.7;
+    }}
+    form {{
+      display: grid;
+      gap: 16px;
+      padding: 24px;
+      border: 1px solid #dedbd4;
+      border-radius: 8px;
+      background: #ffffff;
+      box-shadow: 0 12px 30px rgba(44, 39, 31, 0.08);
+    }}
+    label {{
+      display: grid;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 700;
+      color: #343330;
+    }}
+    input {{
+      width: 100%;
+      min-height: 44px;
+      padding: 10px 12px;
+      border: 1px solid #c8c4bd;
+      border-radius: 6px;
+      font-size: 16px;
+      color: #202124;
+      background: #fbfaf8;
+      outline: none;
+    }}
+    input:focus {{
+      border-color: #1b7f67;
+      box-shadow: 0 0 0 3px rgba(27, 127, 103, 0.14);
+    }}
+    button {{
+      width: fit-content;
+      min-height: 42px;
+      padding: 0 18px;
+      border: 0;
+      border-radius: 6px;
+      font-size: 15px;
+      font-weight: 700;
+      color: #ffffff;
+      background: #1b7f67;
+      cursor: pointer;
+    }}
+    button:hover {{
+      background: #156a56;
+    }}
+    .result {{
+      margin-top: 18px;
+      padding: 20px;
+      border-radius: 8px;
+      border: 1px solid #dedbd4;
+      background: #ffffff;
+    }}
+    .result h2 {{
+      margin: 0 0 12px;
+      font-size: 20px;
+      line-height: 1.3;
+    }}
+    .result p {{
+      margin: 0;
+      line-height: 1.7;
+      color: #4b4d4f;
+    }}
+    .success {{
+      border-left: 4px solid #1b7f67;
+    }}
+    .pending {{
+      border-left: 4px solid #c97813;
+    }}
+    .error {{
+      border-left: 4px solid #b3261e;
+    }}
+    dl {{
+      display: grid;
+      grid-template-columns: 96px 1fr;
+      gap: 8px 12px;
+      margin: 0 0 16px;
+    }}
+    dt {{
+      color: #5f6368;
+    }}
+    dd {{
+      margin: 0;
+      word-break: break-all;
+    }}
+    .code {{
+      padding: 12px;
+      border-radius: 6px;
+      background: #f1f3f1;
+      font-family: Consolas, "Courier New", monospace;
+      word-break: break-all;
+    }}
+    ol {{
+      margin: 12px 0 0;
+      padding-left: 22px;
+      line-height: 1.8;
+    }}
+    @media (max-width: 560px) {{
+      main {{
+        width: min(100% - 24px, 760px);
+        padding: 32px 0;
+      }}
+      h1 {{
+        font-size: 26px;
+      }}
+      form {{
+        padding: 18px;
+      }}
+      button {{
+        width: 100%;
+      }}
+      dl {{
+        grid-template-columns: 1fr;
+        gap: 4px;
+      }}
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>云冰祈 WS 查询</h1>
+    <p class="subtitle">输入已领养的主人 QQ 与 bot QQ。</p>
+    <form method="post" action="/">
+      <label>
+        主人 QQ
+        <input name="owner_qq" value="{safe_owner}" inputmode="numeric" pattern="[0-9]*" autocomplete="off" required>
+      </label>
+      <label>
+        bot QQ
+        <input name="bot_qq" value="{safe_bot}" inputmode="numeric" pattern="[0-9]*" autocomplete="off" required>
+      </label>
+      <button type="submit">查询连接信息</button>
+    </form>
+    {result_html}
+  </main>
+</body>
+</html>"""
+
+
+def _render_success_result(owner_qq: str, bot_qq: str) -> str:
+    ws_info = get_ws_info()
+    ws_address = escape(ws_info.get("ws_address", "未配置"))
+    safe_owner = escape(owner_qq)
+    safe_bot = escape(bot_qq)
+    return f"""
+    <section class="result success">
+      <h2>白名单验证通过</h2>
+      <dl>
+        <dt>主人 QQ</dt>
+        <dd>{safe_owner}</dd>
+        <dt>bot QQ</dt>
+        <dd>{safe_bot}</dd>
+        <dt>WS 地址</dt>
+        <dd><div class="code">{ws_address}</div></dd>
+      </dl>
+      <p>连接方法</p>
+      <ol>
+        <li>在你的 OneBot V11 客户端中新建 ws 反向连接。</li>
+        <li>连接地址填写上方 WS 地址。</li>
+        <li>保存配置并启动 bot，审核通过后即可接入。</li>
+      </ol>
+    </section>"""
+
+
+def _render_pending_result(owner_qq: str, bot_qq: str, review_id: int) -> str:
+    ws_info = get_ws_info()
+    ws_address = escape(ws_info.get("ws_address", "未配置"))
+    safe_owner = escape(owner_qq)
+    safe_bot = escape(bot_qq)
+    return f"""
+    <section class="result pending">
+      <h2>申请正在审核中</h2>
+      <dl>
+        <dt>申请编号</dt>
+        <dd>{review_id}</dd>
+        <dt>主人 QQ</dt>
+        <dd>{safe_owner}</dd>
+        <dt>bot QQ</dt>
+        <dd>{safe_bot}</dd>
+        <dt>WS 地址</dt>
+        <dd><div class="code">{ws_address}</div></dd>
+      </dl>
+      <p>这组账号已提交领养申请，可以先配置连接；审核通过前无法实际接入使用。</p>
+      <ol>
+        <li>在你的 OneBot V11 客户端中新建 ws 反向连接。</li>
+        <li>连接地址填写上方 WS 地址。</li>
+        <li>等待管理员审核通过后再启动或重连 bot。</li>
+      </ol>
+    </section>"""
+
+
+def _render_error_result(message: str) -> str:
+    return f"""
+    <section class="result error">
+      <h2>未返回连接信息</h2>
+      <p>{escape(message)}</p>
+    </section>"""
+
+
+async def _handle_whitelist_web_index(request: web.Request) -> web.Response:
+    return web.Response(
+        text=_render_whitelist_page(),
+        content_type="text/html",
+        charset="utf-8",
+    )
+
+
+async def _handle_whitelist_web_query(request: web.Request) -> web.Response:
+    data = await request.post()
+    owner_qq = str(data.get("owner_qq", "")).strip()
+    bot_qq = str(data.get("bot_qq", "")).strip()
+
+    if not owner_qq or not bot_qq:
+        result_html = _render_error_result("主人 QQ 和 bot QQ 都需要填写。")
+    elif not owner_qq.isdigit() or not bot_qq.isdigit():
+        result_html = _render_error_result("主人 QQ 和 bot QQ 只能填写数字。")
+    elif _is_whitelist_pair(owner_qq, bot_qq):
+        result_html = _render_success_result(owner_qq, bot_qq)
+    else:
+        pending_review_id = _get_pending_review_id(owner_qq, bot_qq)
+        if pending_review_id is not None:
+            result_html = _render_pending_result(owner_qq, bot_qq, pending_review_id)
+        else:
+            result_html = _render_error_result("没有找到匹配的白名单绑定关系或待审核申请。")
+
+    return web.Response(
+        text=_render_whitelist_page(owner_qq, bot_qq, result_html),
+        content_type="text/html",
+        charset="utf-8",
+    )
+
+
+async def _handle_whitelist_web_health(request: web.Request) -> web.Response:
+    return web.json_response({"ok": True, "whitelist_size": get_whitelist_size()})
+
+
+def _create_whitelist_web_app() -> web.Application:
+    app = web.Application()
+    app.router.add_get("/", _handle_whitelist_web_index)
+    app.router.add_post("/", _handle_whitelist_web_query)
+    app.router.add_get("/public_whitelist", _handle_whitelist_web_index)
+    app.router.add_post("/public_whitelist", _handle_whitelist_web_query)
+    app.router.add_get("/health", _handle_whitelist_web_health)
+    return app
+
+
+async def _start_whitelist_web_server():
+    global _whitelist_web_runner, _whitelist_web_site
+
+    if _whitelist_web_runner is not None:
+        return
+
+    runner = web.AppRunner(_create_whitelist_web_app())
+    await runner.setup()
+    site = web.TCPSite(runner, WHITELIST_WEB_HOST, WHITELIST_WEB_PORT)
+
+    try:
+        await site.start()
+    except OSError as e:
+        await runner.cleanup()
+        logger.error(
+            f"[public_whitelist] WS查询网页启动失败，端口 {WHITELIST_WEB_PORT} 可能已被占用: {e}"
+        )
+        return
+
+    _whitelist_web_runner = runner
+    _whitelist_web_site = site
+    logger.info(
+        f"[public_whitelist] WS查询网页已启动: http://{WHITELIST_WEB_HOST}:{WHITELIST_WEB_PORT}/"
+    )
+
+
+async def _stop_whitelist_web_server():
+    global _whitelist_web_runner, _whitelist_web_site
+
+    runner = _whitelist_web_runner
+    _whitelist_web_runner = None
+    _whitelist_web_site = None
+
+    if runner is not None:
+        await runner.cleanup()
+        logger.info("[public_whitelist] WS查询网页已关闭")
 
 
 # ================== 跨平台私信 ==================
@@ -275,7 +629,7 @@ async def handle_adopt_start(
     }
 
     await adopt_cmd.send(
-        "要领养云冰祈咯~\n请先确保已添加bot为好友（否则发不出私信）。\n\n请输入要注册的bot的QQ号（回复 退出 结束领养）：",
+        "要领养云冰祈咯~\n\n请输入要注册的bot的QQ号（回复 退出 结束领养）：",
         at_sender=True
     )
     await adopt_cmd.pause()
@@ -464,19 +818,13 @@ async def handle_step_confirm(
 
     ws_info = get_ws_info()
     ws_help = "\n".join(ws_info.get('connection_help', []))
-    await send_private_message(bot, event, uid,
+    await adopt_cmd.finish(
         f"=== 云冰祈领养申请已提交 ===\n"
         f"申请编号: {review_id}\n"
         f"bot QQ: {ctx['bot_qq']}\n\n"
         f"请先配置你的bot连接：\n{ws_help}\n\n"
         f"WS地址: {ws_info.get('ws_address', '未配置')}\n\n"
         f"审核通过后你的bot即可接入~\n"
-        f"发送「查询领养状态」查看进度"
-    )
-
-    await adopt_cmd.finish(
-        f"领养申请已提交！\n申请编号: {review_id}\n"
-        "WS连接信息已通过私信发送，请注意查收~\n"
         "请耐心等待管理员审核，发送「查询领养状态」查看进度",
         at_sender=True
     )
@@ -774,3 +1122,9 @@ driver = get_driver()
 async def _init_whitelist():
     _init_tables()
     load_cache()
+    await _start_whitelist_web_server()
+
+
+@driver.on_shutdown
+async def _shutdown_whitelist():
+    await _stop_whitelist_web_server()
