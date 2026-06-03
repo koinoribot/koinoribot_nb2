@@ -7,10 +7,9 @@ AI 画图插件
 费用：100000 金币/次，每日限制 5 次/UID。
 """
 
-import json
-import base64
 import sqlite3
 import time
+import asyncio
 import aiohttp
 from dataclasses import dataclass
 from nonebot import on_command, get_driver
@@ -27,6 +26,15 @@ from ...tools import get_uid, build_image_msg, is_onebot, is_qqbot
 from ...koinori_config import config as koinori_config
 from ...utils import FreqLimiter
 from ._image_meta import detect_image_upload_meta
+from ._image_response import (
+    ImageResponseParseError,
+    decode_base64_image,
+    extract_image_reference,
+    format_response_body_dump,
+    format_response_json_dump,
+    parse_image_response_body,
+    summarize_response_json,
+)
 
 __plugin_meta__ = PluginMetadata(
     name="ai_draw",
@@ -313,40 +321,105 @@ async def translate_prompt(api_key: str, user_text: str) -> str:
 
 # ═══════════════ GPT-Image-2 ═══════════════
 
+IMAGE_API_TIMEOUT = aiohttp.ClientTimeout(total=600, connect=30, sock_read=600)
+
+
+async def _read_error_response(resp: aiohttp.ClientResponse) -> str:
+    try:
+        return await resp.text()
+    except Exception:
+        return "(无法读取响应体)"
+
+
+async def _read_success_response_body(resp: aiohttp.ClientResponse, label: str) -> bytes:
+    try:
+        return await resp.read()
+    except asyncio.TimeoutError as e:
+        raise RuntimeError(
+            f"{label} 响应读取超时（HTTP {resp.status} 已返回，图片可能已生成并扣费，"
+            "但本地没有收到完整响应体）"
+        ) from e
+    except aiohttp.ClientError as e:
+        raise RuntimeError(
+            f"{label} 响应读取失败（图片可能已生成）: {type(e).__name__}: {e}"
+        ) from e
+
+
+def _append_response_debug(message: str, dump: str) -> str:
+    return f"{message}\n\n接收到的响应内容：\n```text\n{dump}\n```"
+
+
+async def _consume_image_response(
+    session: aiohttp.ClientSession,
+    resp: aiohttp.ClientResponse,
+    label: str,
+) -> bytes:
+    if resp.status != 200:
+        body = await _read_success_response_body(resp, label)
+        content_type = resp.headers.get("Content-Type", "")
+        dump = format_response_body_dump(body, content_type)
+        logger.error(f"{label} API error: {resp.status}\n{dump}")
+        raise RuntimeError(
+            _append_response_debug(f"{label} API 返回错误: {resp.status}", dump)
+        )
+
+    body = await _read_success_response_body(resp, label)
+    content_type = resp.headers.get("Content-Type", "")
+    try:
+        parsed = parse_image_response_body(body, content_type)
+    except ImageResponseParseError as e:
+        dump = format_response_body_dump(body, content_type)
+        logger.error(f"{label} response parse failed, raw response:\n{dump}")
+        message = f"{label} 响应解析失败（图片可能已生成）: {e}"
+        raise RuntimeError(_append_response_debug(message, dump)) from e
+
+    if isinstance(parsed, bytes):
+        logger.debug(f"{label} response returned direct image bytes: {len(parsed)} bytes")
+        return parsed
+
+    logger.debug(f"{label} response: {summarize_response_json(parsed)}")
+    try:
+        return await _download_result(session, parsed)
+    except RuntimeError as e:
+        dump = format_response_json_dump(parsed)
+        logger.error(f"{label} response had no usable image data:\n{dump}")
+        raise RuntimeError(_append_response_debug(str(e), dump)) from e
+
+
+async def _download_image_url(session: aiohttp.ClientSession, image_url: str) -> bytes:
+    last_error = "unknown error"
+    for attempt in range(1, 4):
+        try:
+            async with session.get(image_url, timeout=IMAGE_API_TIMEOUT) as img_resp:
+                if img_resp.status == 200:
+                    return await img_resp.read()
+
+                text = await _read_error_response(img_resp)
+                last_error = f"HTTP {img_resp.status}: {text[:200]}"
+                if img_resp.status < 500:
+                    break
+        except (asyncio.TimeoutError, aiohttp.ClientError) as e:
+            detail = str(e) or type(e).__name__
+            last_error = f"{type(e).__name__}: {detail}"
+
+        if attempt < 3:
+            await asyncio.sleep(attempt)
+
+    raise RuntimeError(f"下载生成的图片时出错（图片可能已生成，请稍后重试）: {last_error}")
+
+
 async def _download_result(session: aiohttp.ClientSession, data: dict) -> bytes:
     """从 GPT-Image-2 响应中提取图像，若响应包含业务错误则直接抛出"""
-    # 先检查响应体是否包含业务错误（HTTP 200 但实际失败的情况）
-    relay_error = data.get("RelayError") or data.get("error")
-    if relay_error:
-        msg = relay_error if isinstance(relay_error, str) else relay_error.get("message", str(relay_error))
-        raise RuntimeError(f"GPT-Image-2 API 返回错误: {msg}")
+    try:
+        reference = extract_image_reference(data)
+        if reference.url:
+            return await _download_image_url(session, reference.url)
+        if reference.b64_json:
+            return decode_base64_image(reference.b64_json)
+    except ImageResponseParseError as e:
+        raise RuntimeError(f"无法解析图像数据: {e}") from e
 
-    image_url = None
-    if "data" in data and len(data["data"]) > 0:
-        item = data["data"][0]
-        image_url = item.get("url") or item.get("image_url")
-    if not image_url:
-        image_url = data.get("url") or data.get("image_url")
-
-    if image_url:
-        try:
-            async with session.get(image_url, timeout=300) as img_resp:
-                if img_resp.status != 200:
-                    raise RuntimeError(f"下载图像失败: {img_resp.status}")
-                return await img_resp.read()
-        except Exception as e:
-            raise RuntimeError(f"下载生成的图片时出错（图片可能已生成，请稍后重试）: {e}")
-
-    b64 = None
-    if "data" in data and len(data["data"]) > 0:
-        b64 = data["data"][0].get("b64_json")
-    if not b64:
-        b64 = data.get("b64_json")
-
-    if b64:
-        return base64.b64decode(b64)
-
-    raise RuntimeError(f"无法解析图像数据，响应: {json.dumps(data, ensure_ascii=False)[:500]}")
+    raise RuntimeError(f"无法解析图像数据，响应: {summarize_response_json(data)}")
 
 
 async def generate_image(
@@ -360,21 +433,9 @@ async def generate_image(
     }
     payload = {"model": koinori_config.gpt_image_model, "prompt": prompt, "size": size}
 
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, headers=headers, json=payload, timeout=300) as resp:
-            if resp.status != 200:
-                try:
-                    text = await resp.text()
-                except Exception:
-                    text = "(无法读取响应体)"
-                logger.error(f"GPT-Image-2 API error: {resp.status} {text}")
-                raise RuntimeError(f"GPT-Image-2 API 返回错误: {resp.status}\n{text}")
-            try:
-                data = await resp.json()
-            except Exception as e:
-                raise RuntimeError(f"GPT-Image-2 响应解析失败（图片可能已生成）: {e}")
-            logger.debug(f"GPT-Image-2 response: {json.dumps(data, ensure_ascii=False)[:500]}")
-            return await _download_result(session, data)
+    async with aiohttp.ClientSession(timeout=IMAGE_API_TIMEOUT) as session:
+        async with session.post(url, headers=headers, json=payload) as resp:
+            return await _consume_image_response(session, resp, "GPT-Image-2")
 
 
 async def generate_image_edit(
@@ -403,21 +464,9 @@ async def generate_image_edit(
         "Authorization": f"Bearer {api_key}",
     }
 
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, headers=headers, data=form_data, timeout=300) as resp:
-            if resp.status != 200:
-                try:
-                    text = await resp.text()
-                except Exception:
-                    text = "(无法读取响应体)"
-                logger.error(f"GPT-Image-2 Edit API error: {resp.status} {text}")
-                raise RuntimeError(f"GPT-Image-2 图片编辑 API 返回错误: {resp.status}\n{text}")
-            try:
-                data = await resp.json()
-            except Exception as e:
-                raise RuntimeError(f"GPT-Image-2 响应解析失败（图片可能已生成）: {e}")
-            logger.debug(f"GPT-Image-2 Edit response: {json.dumps(data, ensure_ascii=False)[:500]}")
-            return await _download_result(session, data)
+    async with aiohttp.ClientSession(timeout=IMAGE_API_TIMEOUT) as session:
+        async with session.post(url, headers=headers, data=form_data) as resp:
+            return await _consume_image_response(session, resp, "GPT-Image-2 Edit")
 
 
 # ═══════════════ 费用 & 日限检查 ═══════════════
