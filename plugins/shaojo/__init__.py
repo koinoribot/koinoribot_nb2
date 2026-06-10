@@ -203,7 +203,6 @@ async def handle_my_shaojo_image(
         success_text=f"人设：\n{display_profile}",
         size="800x1600",
         quality="high",
-        style="anime",
     )
 
 

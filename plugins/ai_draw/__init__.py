@@ -403,7 +403,6 @@ async def generate_image(
     prompt: str,
     size: str = "auto",
     quality: str = "high",
-    style: str | None = None,
 ) -> bytes:
     """调用 GPT-Image-2 文本生图"""
     url = f"{koinori_config.gpt_image_api_base_url}/images/generations"
@@ -417,8 +416,6 @@ async def generate_image(
         "size": size,
         "quality": quality,
     }
-    if style:
-        payload["style"] = style
 
     async with aiohttp.ClientSession(timeout=IMAGE_API_TIMEOUT) as session:
         async with session.post(url, headers=headers, json=payload) as resp:
@@ -560,7 +557,6 @@ async def do_draw(
     success_text: str | None = None,
     size: str = "auto",
     quality: str = "high",
-    style: str | None = None,
 ) -> None:
     """执行文本生图"""
     if cmd is None:
@@ -593,7 +589,6 @@ async def do_draw(
             user_text,
             size=size,
             quality=quality,
-            style=style,
         )
         image_msg = build_image_msg(event, image_bytes)
     except RuntimeError as e:
