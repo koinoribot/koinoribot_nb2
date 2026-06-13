@@ -12,7 +12,7 @@ import sys
 from typing import Optional, Union
 from weakref import WeakKeyDictionary
 
-from nonebot.log import logger
+from nonebot import logger
 
 from .koinori_config import get_config
 
@@ -566,6 +566,13 @@ def bind_current_uid(uid: int) -> UserWallet:
     uid = int(uid)
     _current_uid.set(uid)
     _bind_task_uid(uid)
+    if TEMP_UID_SOURCE_LOG:
+        task = _get_current_task()
+        logger.info(
+            "[money-bind] "
+            f"uid={uid} task_bound={task is not None} "
+            f"task_id={id(task) if task is not None else None}"
+        )
     return UserWallet(uid)
 
 
