@@ -40,6 +40,8 @@ def get_uid(event: Event, platform_uid: str = Depends(_get_platform_uid)) -> int
         uuid = get_unified_uid(platform="qqbot", external_id=platform_uid)
     if uuid is None:
         raise ValueError(f"不支持的事件类型：{type(event)}")
+    from .money import bind_current_uid
+    bind_current_uid(uuid)
     logger.debug(f"获取统一UID：{uuid}")
     return uuid
 

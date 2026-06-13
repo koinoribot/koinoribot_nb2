@@ -472,7 +472,8 @@ async def check_quota_and_balance(uid: int, cmd, allow_free_draw: bool = True) -
     if allow_free_draw and await get_free_draw_count(uid) > 0:
         return True
 
-    user_gold = money.get_user_money(uid, "gold") or 0
+    wallet = money.of(uid)
+    user_gold = wallet.gold
     if user_gold < koinori_config.draw_cost:
         await cmd.finish(
             f"金币不足！画一张图需要 {koinori_config.draw_cost} 金币，你当前只有 {user_gold} 金币。",
@@ -499,9 +500,8 @@ def pay_draw_cost(uid: int, allow_free_draw: bool = True) -> DrawPayment:
             if cursor.rowcount:
                 return DrawPayment(success=True, used_free_draw=True)
 
-    return DrawPayment(
-        success=bool(money.reduce_user_money(uid, "gold", koinori_config.draw_cost))
-    )
+    money.of(uid).gold -= koinori_config.draw_cost
+    return DrawPayment(success=True)
 
 
 def refund_draw_payment(uid: int, payment: DrawPayment) -> str:
@@ -509,7 +509,7 @@ def refund_draw_payment(uid: int, payment: DrawPayment) -> str:
         _add_free_draw_count_sync(uid, 1)
         return "已返还免费画图次数。"
 
-    money.increase_user_money(uid, "gold", koinori_config.draw_cost)
+    money.of(uid).gold += koinori_config.draw_cost
     return "已退还金币。"
 
 
@@ -644,7 +644,7 @@ async def do_edit(event: Event, uid: int, user_text: str) -> None:
     if not payment:
         await edit_cmd.finish("扣除金币失败，请稍后再试。", at_sender=True)
 
-    user_gold_after = money.get_user_money(uid, "gold") or 0
+    user_gold_after = money.of(uid).gold
     await edit_cmd.send(f"少女修图中…\n已扣除 {koinori_config.draw_cost} 金币 (剩余 {user_gold_after})")
 
     try:

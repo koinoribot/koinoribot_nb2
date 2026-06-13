@@ -1,16 +1,18 @@
 """
 用户资产管理模块
 
-管理用户金币、星星、宝石等资产
-使用统一 UID 系统
+管理用户金币、星星、宝石等资产，使用统一 UID 系统。
+对业务层暴露当前用户钱包代理，例如 money.gold -= 1000。
 """
 
+from contextvars import ContextVar
 import sqlite3
 from typing import Optional, Union
 
 from nonebot.log import logger
 
 from .koinori_config import get_config
+
 
 # 默认初始资产
 DEFAULT_ASSETS = {
@@ -30,6 +32,7 @@ DEFAULT_ASSETS = {
 GOLD_MAX = get_config().gold_max
 
 KEYWORD_LIST = list(DEFAULT_ASSETS.keys())
+KEYWORD_SET = set(KEYWORD_LIST)
 KEY_LIST = ["gold", "luckygold", "starstone", "kirastone"]
 
 # 货币名称映射
@@ -41,45 +44,44 @@ NAME_MAP = {
     "kirastone": ["羽毛石", "宝石", "kirastone"],
 }
 
+_current_uid: ContextVar[Optional[int]] = ContextVar("koinori_money_current_uid", default=None)
 
-class money:
-    """货币管理类 - 封装所有货币/资产相关操作"""
 
-    _db_path: Optional[str] = None
-    _db_initialized: bool = False
+class _MoneyRepository:
+    """SQLite 资产仓库。业务层请使用 money / UserWallet。"""
+
+    def __init__(self):
+        self._db_path: Optional[str] = None
+        self._db_initialized = False
 
     # ===== 数据库路径管理 =====
 
-    @classmethod
-    def set_database_path(cls, path: str):
+    def set_database_path(self, path: str):
         """设置数据库路径"""
-        cls._db_path = path
-        cls._db_initialized = False
+        self._db_path = path
+        self._db_initialized = False
 
-    @classmethod
-    def get_database_path(cls) -> str:
+    def get_database_path(self) -> str:
         """获取数据库路径"""
-        if cls._db_path is None:
+        if self._db_path is None:
             raise RuntimeError("数据库路径未设置，请先调用 money.set_database_path()")
-        return cls._db_path
+        return self._db_path
 
-    @classmethod
-    def _get_connection(cls) -> sqlite3.Connection:
+    def _get_connection(self) -> sqlite3.Connection:
         """获取数据库连接"""
-        conn = sqlite3.connect(cls.get_database_path())
+        conn = sqlite3.connect(self.get_database_path())
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         return conn
 
     # ===== 数据库初始化 =====
 
-    @classmethod
-    def init_database(cls):
+    def init_database(self):
         """初始化用户资产数据库表"""
-        if cls._db_initialized:
+        if self._db_initialized:
             return
 
-        conn = cls._get_connection()
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute("""
@@ -101,16 +103,14 @@ class money:
 
         conn.commit()
         conn.close()
-        cls._db_initialized = True
+        self._db_initialized = True
 
-    @classmethod
-    def _ensure_initialized(cls):
+    def _ensure_initialized(self):
         """确保数据库已初始化"""
-        if not cls._db_initialized:
-            cls.init_database()
+        if not self._db_initialized:
+            self.init_database()
 
-    @classmethod
-    def _ensure_user_exists(cls, cursor, uid: int) -> bool:
+    def _ensure_user_exists(self, cursor, uid: int) -> bool:
         """确保用户记录存在，不存在则创建"""
         cursor.execute("SELECT uid FROM user_money WHERE uid = ?", (uid,))
         if cursor.fetchone() is None:
@@ -137,45 +137,21 @@ class money:
             return True
         return False
 
-    # ===== 名称翻译 =====
+    # ===== 用户资产 CRUD =====
 
-    @classmethod
-    def translate_name(cls, name: str) -> str:
-        """将货币昵称转换为关键字"""
-        for key, names in NAME_MAP.items():
-            if name in names:
-                return key
-        return ""
+    def get(self, uid: int, *keys: str) -> Optional[Union[int, tuple]]:
+        """获取用户指定资源的数量。"""
+        self._ensure_initialized()
 
-    # ===== 用户货币 CRUD =====
-
-    @classmethod
-    def get_user_money(cls, uid: int, *keys: str) -> Optional[Union[int, tuple]]:
-        """
-        获取用户指定资源的数量
-
-        Args:
-            uid: 用户 UID
-            *keys: 资源关键字
-
-        Returns:
-            单个值或值元组
-        """
-        cls._ensure_initialized()
-
-        if not keys:
+        if not keys or any(key not in KEYWORD_SET for key in keys):
             return None
-
-        for key in keys:
-            if key not in KEYWORD_LIST:
-                return None
 
         conn = None
         try:
-            conn = cls._get_connection()
+            conn = self._get_connection()
             cursor = conn.cursor()
 
-            created = cls._ensure_user_exists(cursor, uid)
+            created = self._ensure_user_exists(cursor, uid)
             if created:
                 conn.commit()
 
@@ -188,8 +164,7 @@ class money:
 
             if len(keys) == 1:
                 return int(result[0]) if result[0] is not None else None
-            else:
-                return tuple(int(v) if v is not None else None for v in result)
+            return tuple(int(v) if v is not None else None for v in result)
 
         except Exception as e:
             logger.error(f"[money] 获取用户数据失败: {e}")
@@ -198,33 +173,23 @@ class money:
             if conn:
                 conn.close()
 
-    @classmethod
-    def set_user_money(cls, uid: int, key: str, value: int) -> int:
-        """
-        直接设置用户某种资源
+    def set(self, uid: int, key: str, value: int) -> int:
+        """直接设置用户某种资源。gold 只限制上限，不限制下限。"""
+        self._ensure_initialized()
 
-        Args:
-            uid: 用户 UID
-            key: 资源关键字
-            value: 新值
-
-        Returns:
-            1 成功，0 失败
-        """
-        cls._ensure_initialized()
-
-        if key not in KEYWORD_LIST:
+        if key not in KEYWORD_SET:
             return 0
 
+        value = int(value)
         if key == "gold":
             value = min(value, GOLD_MAX)
 
         conn = None
         try:
-            conn = cls._get_connection()
+            conn = self._get_connection()
             cursor = conn.cursor()
 
-            cls._ensure_user_exists(cursor, uid)
+            self._ensure_user_exists(cursor, uid)
             cursor.execute(f"UPDATE user_money SET {key} = ? WHERE uid = ?", (value, uid))
 
             conn.commit()
@@ -236,30 +201,20 @@ class money:
             if conn:
                 conn.close()
 
-    @classmethod
-    def increase_user_money(cls, uid: int, key: str, value: int) -> int:
-        """
-        增加用户某种资源
+    def increase(self, uid: int, key: str, value: int) -> int:
+        """原子增加用户某种资源。"""
+        self._ensure_initialized()
 
-        Args:
-            uid: 用户 UID
-            key: 资源关键字
-            value: 增加量
-
-        Returns:
-            1 成功，0 失败
-        """
-        cls._ensure_initialized()
-
-        if key not in KEYWORD_LIST:
+        if key not in KEYWORD_SET:
             return 0
 
+        value = int(value)
         conn = None
         try:
-            conn = cls._get_connection()
+            conn = self._get_connection()
             cursor = conn.cursor()
 
-            cls._ensure_user_exists(cursor, uid)
+            self._ensure_user_exists(cursor, uid)
             if key == "gold":
                 cursor.execute(
                     f"UPDATE user_money SET {key} = MIN({key} + ?, ?) WHERE uid = ?",
@@ -279,30 +234,20 @@ class money:
             if conn:
                 conn.close()
 
-    @classmethod
-    def reduce_user_money(cls, uid: int, key: str, value: int) -> int:
-        """
-        减少用户某种资源
+    def decrease(self, uid: int, key: str, value: int) -> int:
+        """原子减少用户某种资源。gold 允许扣成负数。"""
+        self._ensure_initialized()
 
-        Args:
-            uid: 用户 UID
-            key: 资源关键字
-            value: 减少量
-
-        Returns:
-            1 成功，0 失败
-        """
-        cls._ensure_initialized()
-
-        if key not in KEYWORD_LIST:
+        if key not in KEYWORD_SET:
             return 0
 
+        value = int(value)
         conn = None
         try:
-            conn = cls._get_connection()
+            conn = self._get_connection()
             cursor = conn.cursor()
 
-            created = cls._ensure_user_exists(cursor, uid)
+            created = self._ensure_user_exists(cursor, uid)
             if created:
                 conn.commit()
                 return 0  # 新用户无法扣款
@@ -322,17 +267,17 @@ class money:
 
     # ===== 批量操作 =====
 
-    @classmethod
-    def increase_all_user_money(cls, key: str, value: int) -> int:
-        """增加所有用户某种资源"""
-        cls._ensure_initialized()
+    def increase_all(self, key: str, value: int) -> int:
+        """增加所有用户某种资源。"""
+        self._ensure_initialized()
 
-        if key not in KEYWORD_LIST:
+        if key not in KEYWORD_SET:
             return 0
 
+        value = int(value)
         conn = None
         try:
-            conn = cls._get_connection()
+            conn = self._get_connection()
             cursor = conn.cursor()
 
             if key == "gold":
@@ -349,22 +294,16 @@ class money:
             if conn:
                 conn.close()
 
-    @classmethod
-    def get_all_user_money(cls, key: str) -> dict[int, int]:
-        """
-        获取所有用户指定资产
+    def get_all(self, key: str) -> dict[int, int]:
+        """获取所有用户指定资产，返回 {uid: value}。"""
+        self._ensure_initialized()
 
-        Returns:
-            {uid: value}
-        """
-        cls._ensure_initialized()
-
-        if key not in KEYWORD_LIST:
+        if key not in KEYWORD_SET:
             return {}
 
         conn = None
         try:
-            conn = cls._get_connection()
+            conn = self._get_connection()
             cursor = conn.cursor()
 
             cursor.execute(f"SELECT uid, {key} FROM user_money")
@@ -378,14 +317,13 @@ class money:
             if conn:
                 conn.close()
 
-    @classmethod
-    def delete_user_account(cls, uid: int) -> int:
-        """删除用户账户"""
-        cls._ensure_initialized()
+    def delete_user(self, uid: int) -> int:
+        """删除用户账户。"""
+        self._ensure_initialized()
 
         conn = None
         try:
-            conn = cls._get_connection()
+            conn = self._get_connection()
             cursor = conn.cursor()
 
             cursor.execute("DELETE FROM user_money WHERE uid = ?", (uid,))
@@ -400,15 +338,88 @@ class money:
             if conn:
                 conn.close()
 
-    @classmethod
-    def tran_kira(cls, uid: int, key: str, num: int) -> tuple[int, int]:
-        """
-        将羽毛石转换成其他资源
 
-        Args:
-            uid: 用户 UID
-            key: 目标资源关键字
-            num: 羽毛石数量
+_repository = _MoneyRepository()
+
+
+class _MutationApplied:
+    """标记增强赋值已经通过原子更新落库，随后 __setattr__ 无需再写一次。"""
+
+
+_MUTATION_APPLIED = _MutationApplied()
+
+
+class _AssetValue(int):
+    """可当作 int 使用，并让 += / -= 转成原子资产更新。"""
+
+    def __new__(cls, value: int, wallet: "UserWallet", key: str):
+        obj = int.__new__(cls, value)
+        obj._wallet = wallet
+        obj._key = key
+        return obj
+
+    def __iadd__(self, value: int):
+        self._wallet._increase(self._key, int(value))
+        return _MUTATION_APPLIED
+
+    def __isub__(self, value: int):
+        self._wallet._decrease(self._key, int(value))
+        return _MUTATION_APPLIED
+
+
+class UserWallet:
+    """绑定某个 UID 的钱包对象。属性读写会立即落库。"""
+
+    __slots__ = ("uid",)
+
+    def __init__(self, uid: int):
+        object.__setattr__(self, "uid", int(uid))
+
+    def __getattr__(self, key: str) -> int:
+        if key not in KEYWORD_SET:
+            raise AttributeError(key)
+        value = _repository.get(self.uid, key)
+        return _AssetValue(int(value) if value is not None else 0, self, key)
+
+    def __setattr__(self, key: str, value: int):
+        if value is _MUTATION_APPLIED:
+            return
+        if key == "uid":
+            object.__setattr__(self, key, int(value))
+            return
+        if key not in KEYWORD_SET:
+            raise AttributeError(key)
+        _repository.set(self.uid, key, int(value))
+
+    def __getitem__(self, key: str) -> int:
+        if key not in KEYWORD_SET:
+            raise KeyError(key)
+        return getattr(self, key)
+
+    def __setitem__(self, key: str, value: int):
+        if value is _MUTATION_APPLIED:
+            return
+        if key not in KEYWORD_SET:
+            raise KeyError(key)
+        setattr(self, key, value)
+
+    def get(self, *keys: str) -> Optional[Union[int, tuple]]:
+        """获取一个或多个资产字段。"""
+        return _repository.get(self.uid, *keys)
+
+    def set(self, key: str, value: int) -> int:
+        """直接设置资产字段。"""
+        return _repository.set(self.uid, key, value)
+
+    def _increase(self, key: str, value: int) -> int:
+        return _repository.increase(self.uid, key, value)
+
+    def _decrease(self, key: str, value: int) -> int:
+        return _repository.decrease(self.uid, key, value)
+
+    def convert_kirastone(self, key: str, num: int) -> tuple[int, int]:
+        """
+        将羽毛石转换成其他资源。
 
         Returns:
             (消耗的羽毛石, 获得的资源)
@@ -424,57 +435,106 @@ class money:
             value = 0
             num = 0
 
-        cls.increase_user_money(uid, key, value)
-        cls.reduce_user_money(uid, "kirastone", num)
+        self[key] += value
+        self.kirastone -= num
         return num, value
 
 
-# ===== 模块级函数（向后兼容，委托给 money 类） =====
+class MoneyProxy:
+    """当前用户钱包代理。需要先由 tools.get_uid 绑定当前 UID。"""
+
+    @property
+    def uid(self) -> int:
+        uid = _current_uid.get()
+        if uid is None:
+            raise RuntimeError("当前用户 UID 未绑定，请先通过 get_uid 依赖注入或 money.bind(uid) 绑定")
+        return uid
+
+    @property
+    def current(self) -> UserWallet:
+        return UserWallet(self.uid)
+
+    def bind(self, uid: int) -> UserWallet:
+        """绑定当前上下文 UID，并返回该用户钱包。"""
+        return bind_current_uid(uid)
+
+    def of(self, uid: int) -> UserWallet:
+        """获取指定 UID 的钱包。"""
+        return UserWallet(uid)
+
+    def __getattr__(self, key: str) -> int:
+        if key not in KEYWORD_SET:
+            raise AttributeError(key)
+        return getattr(self.current, key)
+
+    def __setattr__(self, key: str, value: int):
+        if key not in KEYWORD_SET:
+            raise AttributeError(key)
+        setattr(self.current, key, value)
+
+    def get(self, *keys: str) -> Optional[Union[int, tuple]]:
+        """获取当前用户一个或多个资产字段。"""
+        return self.current.get(*keys)
+
+    def set(self, key: str, value: int) -> int:
+        """直接设置当前用户资产字段。"""
+        return self.current.set(key, value)
+
+    def add_all(self, key: str, value: int) -> int:
+        """增加所有用户某种资产。"""
+        return _repository.increase_all(key, value)
+
+    def all(self, key: str) -> dict[int, int]:
+        """获取所有用户某种资产。"""
+        return _repository.get_all(key)
+
+    def delete(self, uid: int) -> int:
+        """删除指定 UID 的资产账户。"""
+        return _repository.delete_user(uid)
+
+
+money = MoneyProxy()
+
+
+def bind_current_uid(uid: int) -> UserWallet:
+    """绑定当前上下文 UID，并返回该用户钱包。"""
+    uid = int(uid)
+    _current_uid.set(uid)
+    return UserWallet(uid)
+
+
+# ===== 模块级函数（保留非货币/初始化类接口） =====
 
 def set_database_path(path: str):
-    money.set_database_path(path)
+    _repository.set_database_path(path)
 
 
 def get_database_path() -> str:
-    return money.get_database_path()
+    return _repository.get_database_path()
 
 
 def init_money_database():
-    money.init_database()
+    _repository.init_database()
 
 
 def translate_name(name: str) -> str:
-    return money.translate_name(name)
+    """将货币昵称转换为关键字。"""
+    for key, names in NAME_MAP.items():
+        if name in names:
+            return key
+    return ""
 
 
-def get_user_money(uid: int, *keys: str) -> Optional[Union[int, tuple]]:
-    return money.get_user_money(uid, *keys)
-
-
-def set_user_money(uid: int, key: str, value: int) -> int:
-    return money.set_user_money(uid, key, value)
-
-
-def increase_user_money(uid: int, key: str, value: int) -> int:
-    return money.increase_user_money(uid, key, value)
-
-
-def reduce_user_money(uid: int, key: str, value: int) -> int:
-    return money.reduce_user_money(uid, key, value)
-
-
-def increase_all_user_money(key: str, value: int) -> int:
-    return money.increase_all_user_money(key, value)
-
-
-def get_all_user_money(key: str) -> dict[int, int]:
-    return money.get_all_user_money(key)
-
-
-def delete_user_account(uid: int) -> int:
-    return money.delete_user_account(uid)
-
-
-def tran_kira(uid: int, key: str, num: int) -> tuple[int, int]:
-    return money.tran_kira(uid, key, num)
-
+__all__ = [
+    "DEFAULT_ASSETS",
+    "KEYWORD_LIST",
+    "KEY_LIST",
+    "NAME_MAP",
+    "UserWallet",
+    "money",
+    "bind_current_uid",
+    "set_database_path",
+    "get_database_path",
+    "init_money_database",
+    "translate_name",
+]

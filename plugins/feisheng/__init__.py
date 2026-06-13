@@ -11,7 +11,7 @@ from nonebot.params import CommandArg, Depends
 from nonebot.permission import SUPERUSER
 
 from ...tools import get_uid, send_group_forward_msg, build_forward_chain
-from ... import money
+from ...money import money
 
 # 导入宠物系统相关函数
 from ..chongwu.pet import get_user_pet, use_user_item
@@ -186,10 +186,10 @@ async def handle_cultivate(event: Event, bot: Bot, uid: int = Depends(get_uid)):
         await cultivate_cmd.finish(f"你的【{realm_name}】境界已臻至大圆满！\n请使用『突破』或『幸运突破』指令尝试突破瓶颈。", at_sender=True)
     
     cost = CULTIVATION_COST.get(current_realm, 20000) # 默认最高消耗
-    user_money = money.get_user_money(uid, 'kirastone') or 0
+    user_money = money.kirastone
     if user_money < cost:
          await cultivate_cmd.finish(f"修炼需要{cost}宝石，你只有{user_money}宝石！", at_sender=True)
-    money.reduce_user_money(uid, 'kirastone', cost)
+    money.kirastone -= cost
          
     progress_add = random.randint(5, 10)
     fs_data["ascension_progress"] = min(100, current_progress + progress_add)
@@ -283,10 +283,10 @@ async def handle_buy_item(
         return
         
     total_cost = price * quantity
-    user_money = money.get_user_money(uid, 'kirastone') or 0
+    user_money = money.kirastone
     if user_money < total_cost:
         await buy_item_cmd.finish(f"\n宝石不足！购买{quantity}个{item_name}需要{total_cost}宝石，你只有{user_money}宝石。", at_sender=True)
-    money.reduce_user_money(uid, 'kirastone', total_cost)
+    money.kirastone -= total_cost
     await add_feisheng_item(uid, item_name, quantity)
     await buy_item_cmd.finish(f"\n✅ 成功购买了{quantity}个{item_name}！\n花费了{total_cost}宝石。", at_sender=True)
 

@@ -197,11 +197,11 @@ class FishingManager:
             second_choose = random.randint(1, 1000)
             if second_choose <= 800:
                 coin_amount = random.randint(1, 30)
-                money.increase_user_money(uid, 'gold', coin_amount)
+                money.of(uid).gold += coin_amount
                 return {'code': 1, 'msg': f'你钓到了一个布包，里面有{coin_amount}枚金币~'}
             else:
                 coin_amount = random.randint(1, 3)
-                money.increase_user_money(uid, 'luckygold', coin_amount)
+                money.of(uid).luckygold += coin_amount
                 return {'code': 1, 'msg': f'你钓到了一个锦囊，里面有{coin_amount}枚幸运币！'}
         else:
             # 钓到水之心
@@ -236,9 +236,11 @@ class FishingManager:
             cooldown_manager: 冷却管理器实例
         """
 
+        wallet = money.of(uid)
+
         # 检查星星
         if config.star_price != 0:
-            user_starstone = money.get_user_money(uid, "starstone") or 0
+            user_starstone = wallet.starstone
             if user_starstone < star_cost:
                 await matcher.finish("星星不够用了呢...", at_sender=True)
 
@@ -252,9 +254,9 @@ class FishingManager:
         auto_buy = False
         # 检查鱼饵
         if user_info['fish'].get('🍙', 0) < cost:
-            user_gold = money.get_user_money(uid, "gold") or 0
+            user_gold = wallet.gold
             if user_gold >= actual_cost:
-                money.reduce_user_money(uid, "gold", actual_cost)
+                wallet.gold -= actual_cost
                 auto_buy = True
             else:
                 await matcher.finish("金币或鱼饵不足喔...", at_sender=True)
@@ -267,14 +269,14 @@ class FishingManager:
         if not is_su(uid) and not limit:
             await matcher.send(f'\n今日钓鱼次数已达上限喔...你还能钓鱼{rest_count}次。\n明天再来吧~', at_sender=True)
             if auto_buy:
-                money.increase_user_money(uid, "gold", actual_cost)
+                wallet.gold += actual_cost
             return
 
         cooldown_manager.start_cd(uid)
 
         # 扣星星
         if config.star_price != 0:
-            money.reduce_user_money(uid, "starstone", star_cost)
+            wallet.starstone -= star_cost
 
         # 消耗鱼饵
         if not auto_buy:
@@ -315,7 +317,7 @@ class FishingManager:
 
         # 活动补贴
         if not have_star and config.extra_gold == 1 and times == 100:
-            money.increase_user_money(uid, "gold", 300)
+            wallet.gold += 300
             summary_message += f"+300金币(活动补贴)"
 
         summary_message += f"\n总花费：{actual_cost}金币"
@@ -326,13 +328,13 @@ class FishingManager:
         if actual_cost > 0 and times >= 100:
             ratio = value / actual_cost
             if ratio > 3:
-                money.increase_user_money(uid, "luckygold", 3)
+                wallet.luckygold += 3
                 summary_message += "\n幸运币+3"
             elif ratio > 2.5:
-                money.increase_user_money(uid, "luckygold", 2)
+                wallet.luckygold += 2
                 summary_message += "\n幸运币+2"
             elif ratio > 2:
-                money.increase_user_money(uid, "luckygold", 1)
+                wallet.luckygold += 1
                 summary_message += "\n幸运币+1"
 
         # ===== 构建次数统计消息（放入合并转发） =====

@@ -151,9 +151,9 @@ async def handle_single_fish(
     auto_buy = False
     # 检查鱼饵
     if user_info["fish"].get("🍙", 0) < config.bait_num:
-        user_gold = money.get_user_money(uid, "gold") or 0
+        user_gold = money.gold
         if user_gold >= bait_cost:
-            money.reduce_user_money(uid, "gold", bait_cost)
+            money.gold -= bait_cost
             auto_buy = True
         else:
             await single_fish_cmd.finish(
@@ -322,11 +322,11 @@ async def handle_buy_bait(
 
     cost = num * config.bait_price
 
-    user_gold = money.get_user_money(uid, "gold") or 0
+    user_gold = money.gold
     if user_gold < cost:
         await buy_bait_cmd.finish("金币不足喔...", at_sender=True)
 
-    money.reduce_user_money(uid, "gold", cost)
+    money.gold -= cost
     await FishingManager.increase_value(uid, "fish", "🍙", num)
 
     await buy_bait_cmd.finish(f"成功购买{num}个鱼饵~(金币-{cost})", at_sender=True)
@@ -383,7 +383,7 @@ async def handle_sell(
 
     await FishingManager.decrease_value(uid, "fish", fish, num, user_info)
     get_golds = FISH_PRICE.get(fish, 0) * num
-    money.increase_user_money(uid, "gold", get_golds)
+    money.gold += get_golds
     await FishingManager.increase_value(uid, "statis", "sell", get_golds, user_info)
     await FishingManager.save_user_info(uid, user_info)
 
@@ -414,7 +414,7 @@ async def handle_sell_small(
             result.append(f"{fish}×{count} → {gold}金币")
 
     if total_gold > 0:
-        money.increase_user_money(uid, "gold", total_gold)
+        money.gold += total_gold
         await FishingManager.increase_value(
             uid, "statis", "sell", total_gold, user_info
         )
@@ -449,7 +449,7 @@ async def handle_sell_all(
             result.append(f"{fish}×{count} → {gold}金币")
 
     if total_gold > 0:
-        money.increase_user_money(uid, "gold", total_gold)
+        money.gold += total_gold
         await FishingManager.increase_value(
             uid, "statis", "sell", total_gold, user_info
         )
@@ -553,11 +553,11 @@ async def handle_buy_bottle(
 
     cost = num * config.bottle_price
 
-    user_gold = money.get_user_money(uid, "gold") or 0
+    user_gold = money.gold
     if user_gold < cost:
         await buy_bottle_cmd.finish("金币不足喔...", at_sender=True)
 
-    money.reduce_user_money(uid, "gold", cost)
+    money.gold -= cost
     await FishingManager.increase_value(uid, "fish", "✉", num)
 
     await buy_bottle_cmd.finish(f"成功买下{num}个漂流瓶~(金币-{cost})", at_sender=True)
@@ -797,7 +797,7 @@ async def handle_comment_bottle(
             f"休息一会再评论吧~({int(comm_freq.left_time(uid))}s)"
         )
 
-    user_gold = money.get_user_money(uid, "gold") or 0
+    user_gold = money.gold
     if user_gold < config.comment_price:
         await comment_bottle_cmd.finish(
             f"评论漂流瓶需要{config.comment_price}枚金币", at_sender=True
@@ -819,7 +819,7 @@ async def handle_comment_bottle(
     if not BottleManager.add_comment(bottle_id, uid, content):
         await comment_bottle_cmd.finish("找不到这个漂流瓶", at_sender=True)
 
-    money.reduce_user_money(uid, "gold", config.comment_price)
+    money.gold -= config.comment_price
     comm_freq.start_cd(uid)
 
     await comment_bottle_cmd.finish(

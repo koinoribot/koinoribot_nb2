@@ -18,7 +18,7 @@ from io import BytesIO
 from PIL import Image
 from .aslogin_v3 import get_src_path, del_custom_bg, dl_save_image, get_purse, as_login_v3
 # 导入核心模块
-from ... import money
+from ...money import money
 from ...utils import FreqLimiter
 from ...tools import get_uid, get_sender_nickname, get_user_avatar_url, is_qqbot, is_onebot, build_forward_chain, send_group_forward_msg
 import nonebot.adapters.onebot.v11 as onebot_adapter
@@ -27,7 +27,6 @@ from ...uid_manager import (
     delete_uid_mapping
 )
 from ...nickname import get_user_nickname
-from ... import money
 from ...su_manager import get_excluded_su_uids
 from ..feisheng.data import get_all_feisheng_status
 
@@ -124,7 +123,7 @@ async def handle_gold_ranking(
 ):
     """处理金币排行榜命令"""
     
-    all_gold_data = money.get_all_user_money('gold')
+    all_gold_data = money.all('gold')
     
     if not all_gold_data:
         await rank_cmd.finish("排行榜暂无数据。")
@@ -208,7 +207,7 @@ async def handle_upload_bg(
         await upload_bg_cmd.finish("请附带图片~", at_sender=True)
     
     # 检查金币
-    user_gold = money.get_user_money(uid, 'gold') or 0
+    user_gold = money.gold
     if user_gold < UPLOAD_BG_COST:
         await upload_bg_cmd.finish("金币不足...", at_sender=True)
     
@@ -217,7 +216,7 @@ async def handle_upload_bg(
     
     # 扣除金币（如果需要）
     if UPLOAD_BG_COST > 0:
-        money.reduce_user_money(uid, 'gold', UPLOAD_BG_COST)
+        money.gold -= UPLOAD_BG_COST
         msg = f"已上传图片~(将扣除{UPLOAD_BG_COST}金币)"
     else:
         msg = "已上传图片~"
@@ -282,7 +281,7 @@ async def handle_find_uid(
     target_uid = int(msg[1])
     
     # 检查金币
-    user_gold = money.get_user_money(uid, 'gold') or 0
+    user_gold = money.gold
     cost = 10000
     
     if user_gold < cost:
@@ -299,7 +298,7 @@ async def handle_find_uid(
         await find_uid_cmd.finish("目标uid不存在或未绑定任何平台。", at_sender=True)
         
     # 扣除金币
-    money.reduce_user_money(uid, 'gold', cost)
+    money.gold -= cost
     
     ret_msg = (
         f"消耗 {cost} 金币，为您查询到uid={target_uid}的信息：\n"
@@ -421,10 +420,12 @@ async def handle_bind(
         )
 
     # 获取两个uid的资产信息用于展示
-    source_gold = money.get_user_money(source_uid, 'gold') or 0
-    source_gem = money.get_user_money(source_uid, 'kirastone') or 0
-    current_gold = money.get_user_money(uid, 'gold') or 0
-    current_gem = money.get_user_money(uid, 'kirastone') or 0
+    source_wallet = money.of(source_uid)
+    current_wallet = money.of(uid)
+    source_gold = source_wallet.gold
+    source_gem = source_wallet.kirastone
+    current_gold = current_wallet.gold
+    current_gem = current_wallet.kirastone
 
     source_qq = source_ids.get("onebot_id", "无")
     source_openid = source_ids.get("qqbot_id", "无")

@@ -22,7 +22,7 @@ from nonebot.adapters import Event, Bot, Message
 from nonebot.params import Depends, RegexGroup, CommandArg
 from nonebot import logger
 
-from ... import money
+from ...money import money
 from ...koinori_config import config
 from ...tools import get_uid, send_group_forward_msg, build_forward_chain, get_at_uid, build_image_msg
 from ..fishing.util import DatabaseManager as FishingDB
@@ -316,26 +316,24 @@ async def handle_buy_stock(event: Event, bot: Bot, uid: int = Depends(get_uid), 
     fee = math.ceil(base_cost * 0.01)
     total_cost = math.ceil(base_cost) + fee
     
-    user_gold = money.get_user_money(uid, 'gold') or 0
+    user_gold = money.gold
     if user_gold < total_cost:
         await buy_stock_cmd.finish(
             f"金币不足！购买{amount_to_buy}股{stock_name}需要{total_cost}金币"
             f"（含{fee}手续费），您只有{user_gold}金币。", at_sender=True)
     
     # 执行购买
-    if money.reduce_user_money(uid, 'gold', total_cost):
-        if await update_user_portfolio(uid, stock_name, amount_to_buy):
-            await buy_stock_cmd.finish(
-                f"✅ 购买成功！\n"
-                f"股票: {stock_name}\n"
-                f"数量: {amount_to_buy}股\n"
-                f"单价: {current_price:.2f}金币\n"
-                f"费用: {total_cost}金币（含{fee}手续费）", at_sender=True)
-        else:
-            money.increase_user_money(uid, 'gold', total_cost)
-            await buy_stock_cmd.finish("购买失败，金币已退回。", at_sender=True)
-    else:
-        await buy_stock_cmd.finish("购买失败，扣除金币时发生错误。", at_sender=True)
+    money.gold -= total_cost
+    if await update_user_portfolio(uid, stock_name, amount_to_buy):
+        await buy_stock_cmd.finish(
+            f"✅ 购买成功！\n"
+            f"股票: {stock_name}\n"
+            f"数量: {amount_to_buy}股\n"
+            f"单价: {current_price:.2f}金币\n"
+            f"费用: {total_cost}金币（含{fee}手续费）", at_sender=True)
+
+    money.gold += total_cost
+    await buy_stock_cmd.finish("购买失败，金币已退回。", at_sender=True)
 
 
 # ===== 卖出股票 =====
@@ -385,7 +383,7 @@ async def handle_sell_stock(event: Event, bot: Bot, uid: int = Depends(get_uid),
     
     # 执行出售
     if await update_user_portfolio(uid, stock_name, -amount_to_sell):
-        money.increase_user_money(uid, 'gold', total_earnings)
+        money.gold += total_earnings
         await sell_stock_cmd.finish(
             f"✅ 卖出成功！\n"
             f"股票: {stock_name}\n"
@@ -666,13 +664,14 @@ async def perform_gamble_round(uid: int) -> dict:
 async def gold_change_record(uid: int, start_gold: int, final_gold: int) -> str:
     """计算并应用金币变化，返回结果消息"""
     change = final_gold - start_gold
+    wallet = money.of(uid)
     await update_gamble_record(uid, change)
     if change > 0:
-        money.increase_user_money(uid, 'gold', change)
+        wallet.gold += change
         record = f"\n最终金币变化：+{change}"
     else:
         change = change * -1
-        money.reduce_user_money(uid, 'gold', change)
+        wallet.gold -= change
         record = f"\n最终金币变化：-{change}"
     return record
 
@@ -696,8 +695,8 @@ async def handle_start_gamble(event: Event, bot: Bot, uid: int = Depends(get_uid
         await gamble_start_cmd.finish("你今天已经赌过了，明天再来吧！人生的大起大落可经不起天天折腾哦。", at_sender=True)
     
     # 获取当前金币
-    gold = money.get_user_money(uid, 'gold') or 0
-    luckygold = money.get_user_money(uid, 'luckygold') or 0
+    gold = money.gold
+    luckygold = money.luckygold
     
     if gold <= 0:
         await gamble_start_cmd.finish("欠债/失信用户，禁止游戏。", at_sender=True)
@@ -737,8 +736,8 @@ async def handle_confirm_gamble(event: Event, bot: Bot, uid: int = Depends(get_u
     if uid not in gambling_sessions or gambling_sessions[uid].get('confirmed', False):
         return  # 不在等待确认状态，忽略
     
-    gold = money.get_user_money(uid, 'gold') or 0
-    luckygold = money.get_user_money(uid, 'luckygold') or 0
+    gold = money.gold
+    luckygold = money.luckygold
     start_gold = gambling_sessions[uid]['start_gold']
     
     if gold != start_gold:
@@ -749,7 +748,7 @@ async def handle_confirm_gamble(event: Event, bot: Bot, uid: int = Depends(get_u
         del gambling_sessions[uid]
         await gamble_confirm_cmd.finish("你没有足够的幸运币参与幸运游戏。", at_sender=True)
     
-    money.reduce_user_money(uid, 'luckygold', 1)
+    money.luckygold -= 1
     
     # 标记确认，激活会话
     gambling_sessions[uid]['confirmed'] = True
@@ -794,12 +793,12 @@ async def handle_continue_gamble(event: Event, bot: Bot, uid: int = Depends(get_
         return  # 不在游戏中，忽略
     
     current_round = gambling_sessions[uid]['round']
-    luckygold = money.get_user_money(uid, 'luckygold') or 0
+    luckygold = money.luckygold
     
     if luckygold < 1:
         await gamble_continue_cmd.finish("你没有足够的幸运币继续。发送 见好就收 可以退出游戏~", at_sender=True)
     
-    money.reduce_user_money(uid, 'luckygold', 1)
+    money.luckygold -= 1
     
     # 进入下一轮
     next_round = current_round + 1
@@ -985,15 +984,17 @@ def draw_prize() -> str:
 
 
 async def _give_wallet_gold_double(uid: int, special_prize: str) -> str:
-    user_gold = money.get_user_money(uid, 'gold') or 0
-    money.increase_user_money(uid, 'gold', user_gold)
+    wallet = money.of(uid)
+    user_gold = wallet.gold
+    wallet.gold += user_gold
     return special_prize
 
 
 async def _give_wallet_gold_deduct(uid: int, special_prize: str) -> str:
-    user_gold = money.get_user_money(uid, 'gold') or 0
+    wallet = money.of(uid)
+    user_gold = wallet.gold
     deduct = max(1, int(user_gold * 0.01))
-    money.reduce_user_money(uid, 'gold', deduct)
+    wallet.gold -= deduct
     return special_prize
 
 
@@ -1033,7 +1034,7 @@ async def give_prize(uid: int, prize_tier: str) -> str:
         prize_name = random.choice(list(PRIZES.keys()))
         prize_info = PRIZES[prize_name]
         prize_amount = max(1, int(prize_info["amount"] * random.randint(5, 20) * prize_config['multiplier']))
-        money.increase_user_money(uid, prize_name, prize_amount)
+        money.of(uid)[prize_name] += prize_amount
         return f"{prize_info['chinese']} *{prize_amount}"
 
 
@@ -1053,7 +1054,7 @@ turntable_cmd = on_command("幸运转盘", aliases={"幸运大转盘"}, priority
 @turntable_cmd.handle()
 async def handle_turntable(event: Event, bot: Bot, uid: int = Depends(get_uid)):
     """处理幸运大转盘游戏逻辑"""
-    gold = money.get_user_money(uid, 'gold') or 0
+    gold = money.gold
     if gold <= 0:
         await turntable_cmd.finish("欠债/失信用户，禁止游戏。", at_sender=True)
     
@@ -1064,11 +1065,11 @@ async def handle_turntable(event: Event, bot: Bot, uid: int = Depends(get_uid)):
         await turntable_cmd.finish(f"您今天的 {MAX_TURNS_PER_DAY} 次机会已经用完啦，明天再来吧！", at_sender=True)
     
     # 检查幸运币
-    lucky_coins = money.get_user_money(uid, 'luckygold') or 0
+    lucky_coins = money.luckygold
     if lucky_coins < 1:
         await turntable_cmd.finish("您的幸运币不足，无法启动转盘哦。", at_sender=True)
     
-    money.reduce_user_money(uid, 'luckygold', 1)
+    money.luckygold -= 1
     remaining_turns = await record_turntable_spin(uid)
     
     # 抽取奖品
@@ -1109,7 +1110,7 @@ async def handle_dibao(event: Event, bot: Bot, uid: int = Depends(get_uid)):
         await dibao_cmd.finish(f"检测到你偷偷藏了股票({stock_names})，这么富还想骗低保？", at_sender=True)
     
     # 检查金币
-    user_gold = money.get_user_money(uid, 'gold') or 0
+    user_gold = money.gold
     if user_gold > 4999:
         await dibao_cmd.finish("这么富，还想骗低保？", at_sender=True)
     if user_gold < 0:
@@ -1121,10 +1122,10 @@ async def handle_dibao(event: Event, bot: Bot, uid: int = Depends(get_uid)):
     # 发放低保
     pet = await get_user_pet(uid)
     if pet and not pet["runaway"]:
-        money.increase_user_money(uid, 'gold', dibao_amount+3000)
+        money.gold += dibao_amount + 3000
         await dibao_cmd.finish(f"已领取{dibao_amount+3000}金币（含宠物补贴）。\n你现在有{user_gold + dibao_amount+3000}金币", at_sender=True)
     else:
-        money.increase_user_money(uid, 'gold', dibao_amount)
+        money.gold += dibao_amount
         await dibao_cmd.finish(f"已领取{dibao_amount}金币。\n你现在有{user_gold + dibao_amount}金币", at_sender=True)
 
 
@@ -1254,9 +1255,9 @@ async def _do_transfer(cmd, sender_uid: int, target_uid: int, amount: int):
     total_amount = amount + fee
     
     # 检查余额
-    gold = money.get_user_money(sender_uid, 'gold')
-    if gold is None:
-        await cmd.finish('无法获取转账人金币数量', at_sender=True)
+    sender_wallet = money.of(sender_uid)
+    target_wallet = money.of(target_uid)
+    gold = sender_wallet.gold
     if gold < total_amount:
         await cmd.finish(f'\n余额不足，本次转账需要 {total_amount} 金币，包含 {fee} 金币手续费。\n你当前只有 {gold} 金币', at_sender=True)
     
@@ -1265,14 +1266,8 @@ async def _do_transfer(cmd, sender_uid: int, target_uid: int, amount: int):
         await cmd.finish(f'\n禁止转账，如果转账，则你将仅剩{restgold}金币。\n请确保转账后剩余金币大于{MIN_REST}。', at_sender=True)
     
     # 执行转账
-    reduce_result = money.reduce_user_money(sender_uid, 'gold', total_amount)
-    if not reduce_result:
-        await cmd.finish('转账操作失败，请稍后再试', at_sender=True)
-    
-    increase_result = money.increase_user_money(target_uid, 'gold', amount)
-    if not increase_result:
-        money.increase_user_money(sender_uid, 'gold', total_amount)
-        await cmd.finish('转账失败，已退还金币', at_sender=True)
+    sender_wallet.gold -= total_amount
+    target_wallet.gold += amount
     
     record_su_usage(sender_uid, 'transfer', amount)
     await cmd.finish(f'\n转账成功，已向 UID:{target_uid} 转账 {amount} 金币，手续费 {fee} 金币\n你当前还剩 {restgold} 金币', at_sender=True)
@@ -1308,7 +1303,7 @@ async def handle_admin_add_uid(event: Event, bot: Bot, uid: int = Depends(get_ui
     if not allowed:
         await admin_add_uid_cmd.finish(f'\n{reason}', at_sender=True)
     
-    money.increase_user_money(target_uid, 'gold', amount)
+    money.of(target_uid).gold += amount
     await admin_add_uid_cmd.finish(f'已向 UID:{target_uid} 打款 {amount} 金币', at_sender=True)
 
 
@@ -1342,7 +1337,7 @@ async def handle_admin_add_qq(event: Event, bot: Bot, uid: int = Depends(get_uid
     if not allowed:
         await admin_add_qq_cmd.finish(f'\n{reason}', at_sender=True)
     
-    money.increase_user_money(target_uid, 'gold', amount)
+    money.of(target_uid).gold += amount
     await admin_add_qq_cmd.finish(f'已向 QQ:{target_qq} (UID:{target_uid}) 打款 {amount} 金币', at_sender=True)
 
 
@@ -1371,12 +1366,11 @@ async def handle_admin_reduce_uid(event: Event, bot: Bot, uid: int = Depends(get
     if not uid_manager.is_uid_exists(target_uid):
         await admin_reduce_uid_cmd.finish(f"找不到 UID:{target_uid} 对应的账户", at_sender=True)
     
-    target_gold = money.get_user_money(target_uid, 'gold')
-    if target_gold is None:
-        await admin_reduce_uid_cmd.finish('无法获取目标用户金币数量', at_sender=True)
+    target_wallet = money.of(target_uid)
+    target_gold = target_wallet.gold
     
     deduct_amount = min(amount, target_gold)
-    money.reduce_user_money(target_uid, 'gold', deduct_amount)
+    target_wallet.gold -= deduct_amount
     await admin_reduce_uid_cmd.finish(f'已从 UID:{target_uid} 扣款 {deduct_amount} 金币', at_sender=True)
 
 
@@ -1405,10 +1399,9 @@ async def handle_admin_reduce_qq(event: Event, bot: Bot, uid: int = Depends(get_
     if target_uid is None:
         await admin_reduce_qq_cmd.finish(f"找不到QQ号 {target_qq} 对应的账户", at_sender=True)
     
-    target_gold = money.get_user_money(target_uid, 'gold')
-    if target_gold is None:
-        await admin_reduce_qq_cmd.finish('无法获取目标用户金币数量', at_sender=True)
+    target_wallet = money.of(target_uid)
+    target_gold = target_wallet.gold
     
     deduct_amount = min(amount, target_gold)
-    money.reduce_user_money(target_uid, 'gold', deduct_amount)
+    target_wallet.gold -= deduct_amount
     await admin_reduce_qq_cmd.finish(f'已从 QQ:{target_qq} (UID:{target_uid}) 扣款 {deduct_amount} 金币', at_sender=True)

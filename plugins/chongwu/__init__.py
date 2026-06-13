@@ -17,7 +17,7 @@ from nonebot.adapters import Event, Bot, Message
 from nonebot import logger
 from nonebot.params import CommandArg, Depends
 
-from ... import money
+from ...money import money
 from ...koinori_config import config
 from ...tools import get_uid, send_group_forward_msg, build_forward_chain
 
@@ -118,12 +118,12 @@ async def handle_buy_kirastone(
         await buy_kirastone_cmd.finish("购买数量必须是正整数！", at_sender=True)
     price_per_gem = 1000
     total_cost = quantity * price_per_gem
-    user_money = money.get_user_money(uid, 'gold')
+    user_money = money.gold
     if user_money < total_cost:
         await buy_kirastone_cmd.finish(f"金币不足！购买{quantity}个宝石需要{total_cost}金币，你只有{user_money}金币。", at_sender=True)
 
-    money.reduce_user_money(uid, 'gold', total_cost)
-    money.increase_user_money(uid, 'kirastone', quantity)
+    money.gold -= total_cost
+    money.kirastone += quantity
     await buy_kirastone_cmd.finish(f"你成功购买了{quantity}枚宝石，花费了{total_cost}金币！", at_sender=True)
 
 # ===== 卖宝石 =====
@@ -140,14 +140,14 @@ async def handle_sell_kirastone(
     quantity = int(arg_parts[0])
     if quantity <= 0:
         await sell_kirastone_cmd.finish("出售数量必须是正整数！", at_sender=True)
-    user_gems = money.get_user_money(uid, 'kirastone') or 0
+    user_gems = money.kirastone
     if user_gems < quantity:
         await sell_kirastone_cmd.finish(f"宝石不足！你只有{user_gems}枚宝石，无法出售{quantity}枚。", at_sender=True)
 
-    money.reduce_user_money(uid, 'kirastone', quantity)
+    money.kirastone -= quantity
     fee = int(quantity * 1000 * config.stone_fee)
     gold_earned = quantity * 1000 - fee
-    money.increase_user_money(uid, 'gold', gold_earned)
+    money.gold += gold_earned
     await sell_kirastone_cmd.finish(f"你成功出售了{quantity}枚宝石，获得了{gold_earned}金币。(已自动扣除{fee}金币手续费)", at_sender=True)
 
 # ===== 开启扭蛋 =====
@@ -176,10 +176,10 @@ async def handle_open_gacha(
             await open_gacha_cmd.finish(f"你已有一只宠物({pet_data['type']})等待领养，请先领养或放弃。", at_sender=True)
         else:
             if random.random() < 0.9:
-                money.increase_user_money(uid, 'gold', GACHA_CONSOLE_PRIZE)
+                money.gold += GACHA_CONSOLE_PRIZE
                 await open_gacha_cmd.finish(f"你已经有宠物了，本次扭蛋里没有宠物，获得{GACHA_CONSOLE_PRIZE}金币安慰奖...", at_sender=True)
             else:
-                money.increase_user_money(uid, 'luckygold', 1)
+                money.luckygold += 1
                 await open_gacha_cmd.finish("你已经有宠物了，本次扭蛋里没有宠物，但有1枚幸运币...", at_sender=True)
     
     pet_type = None
@@ -198,10 +198,10 @@ async def handle_open_gacha(
     else:
         if random.random() < 0.5:
             if random.random() < 0.8:
-                money.increase_user_money(uid, 'gold', GACHA_CONSOLE_PRIZE)
+                money.gold += GACHA_CONSOLE_PRIZE
                 await open_gacha_cmd.finish(f"扭蛋里没有宠物，获得{GACHA_CONSOLE_PRIZE}金币安慰奖...", at_sender=True)
             else:
-                money.increase_user_money(uid, 'luckygold', 1)
+                money.luckygold += 1
                 await open_gacha_cmd.finish("扭蛋里没有宠物，但有1枚幸运币...", at_sender=True)
         
         roll = random.random() * 100
@@ -230,7 +230,7 @@ async def handle_open_gacha(
             f"🎉 恭喜！从[{gacha_name}]中抽中了{rarity}宠物【{pet_type}】！\n"
             f"请使用'领养宠物 [名字]'来领养她，或使用'放弃宠物'放弃。", at_sender=True)
     else:
-        money.increase_user_money(uid, 'gold', GACHA_CONSOLE_PRIZE)
+        money.gold += GACHA_CONSOLE_PRIZE
         await open_gacha_cmd.finish(f"很遗憾，没有抽中宠物，获得{GACHA_CONSOLE_PRIZE}金币安慰奖！", at_sender=True)
 
 
@@ -415,16 +415,14 @@ async def handle_buy(
         return
     
     price = PET_SHOP_ITEMS[item_name]["price"] * quantity
-    user_stones = money.get_user_money(uid, 'kirastone') or 0
+    user_stones = money.kirastone
     
     if user_stones < price:
         await buy_cmd.finish(f"宝石不足！购买{quantity}个{item_name}需要{price}宝石，你只有{user_stones}宝石。", at_sender=True)
     
-    if money.reduce_user_money(uid, 'kirastone', price):
-        await add_user_item(uid, item_name, quantity)
-        await buy_cmd.finish(f"✅ 成功购买了{quantity}个{item_name}！", at_sender=True)
-    else:
-        await buy_cmd.finish("购买失败，请稍后再试！", at_sender=True)
+    money.kirastone -= price
+    await add_user_item(uid, item_name, quantity)
+    await buy_cmd.finish(f"✅ 成功购买了{quantity}个{item_name}！", at_sender=True)
 
 
 # ===== 宠物背包 =====
@@ -478,7 +476,7 @@ async def handle_return_item(
     fee_percent = int(return_fee * 100)
     
     if await use_user_item(uid, item_name, quantity):
-        money.increase_user_money(uid, 'kirastone', price)
+        money.kirastone += price
         await return_item_cmd.finish(
             f"按照{fee_percent}%的价格成功退还了{quantity}个{item_name}！\n你获得了{price}个宝石。", at_sender=True)
     else:
@@ -754,7 +752,7 @@ async def handle_pet_event(event: Event, bot: Bot, uid: int = Depends(get_uid)):
         try:
             if skill_name == "宝石爱好者":
                 amount = random.randint(1, 20)
-                money.increase_user_money(uid, 'kirastone', amount)
+                money.kirastone += amount
                 results.append(f"\n{pet['name']}外出玩耍时偶遇无人看守的宝石矿井，偷偷捡回了{amount}枚宝石。")
             elif skill_name == "盼望长大":
                 growth_gain = 10
@@ -762,15 +760,15 @@ async def handle_pet_event(event: Event, bot: Bot, uid: int = Depends(get_uid)):
                 results.append(f"\n{pet['name']}很喜欢你，决定要努力长大来报答你，成长值+{growth_gain}。")
             elif skill_name == "金币爱好者":
                 amount = random.randint(1000, 20000)
-                money.increase_user_money(uid, 'gold', amount)
+                money.gold += amount
                 results.append(f"\n{pet['name']}外出玩耍时捡到了一个钱包，里面有{amount}金币。")
             elif skill_name == "幸运星":
                 amount = random.randint(5, 7)
-                money.increase_user_money(uid, 'luckygold', amount)
+                money.luckygold += amount
                 results.append(f"\n{pet['name']}外出玩耍时偶遇音祈，由于可爱的外表，深受对方喜爱，获得了上帝的祝福。幸运币+{amount}。")
             elif skill_name == "卖萌":
                 amount = random.randint(100, 2000)
-                money.increase_user_money(uid, 'starstone', amount)
+                money.starstone += amount
                 results.append(f"\n{pet['name']}外出玩耍时偶遇梦灵，由于太可爱了，被大小姐rua了个爽，并收获了大量好感度（星星+{amount}）。")
             elif skill_name == "美食家":
                 food_item = random.choice(["普通料理", "高级料理", "豪华料理", "能量饮料"])

@@ -34,9 +34,8 @@ async def say_goodnight_handle(
         return
     cooldown[user_id] = now
 
-    user_gold = money.get_user_money(uid, "gold") or 0
-    if user_gold >= 50:
-        money.reduce_user_money(uid, "gold", 50)
+    if money.gold >= 50:
+        money.gold -= 50
         await say_goodnight.finish("晚安喵")
     else:
         return

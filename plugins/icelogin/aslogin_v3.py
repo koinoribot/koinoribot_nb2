@@ -19,7 +19,7 @@ import uuid
 
 import aiohttp
 
-from ... import money
+from ...money import money
 from ...build_image import BuildImage
 from .color_convert import lab2rgb
 
@@ -195,7 +195,8 @@ async def as_login_v3(uid: int, username: str, qqname: str, nick_flag: int, avat
     months = int(time.strftime("%m", current_time))
     week = int(time.strftime("%w", current_time))
     
-    last_login = money.get_user_money(uid, "last_login") or 0
+    wallet = money.of(uid)
+    last_login = wallet.last_login
     gold = 100
     login_flag = 1 if int(f'{months}0{days}') == last_login else 0
     
@@ -224,16 +225,16 @@ async def as_login_v3(uid: int, username: str, qqname: str, nick_flag: int, avat
             break
     
     if not login_flag:
-        money.increase_user_money(uid, "logindays", 1)
+        wallet.logindays += 1
     
     # 人品值
-    h = money.get_user_money(uid, "rp") if login_flag else _hash()
+    h = wallet.rp if login_flag else _hash()
     rp = h % 101
     info = feed_back(rp)
     
     # 宜忌
-    good_todo_index = money.get_user_money(uid, "goodluck") if login_flag else luck_choice(0)
-    bad_todo_index = money.get_user_money(uid, "badluck") if login_flag else luck_choice(1)
+    good_todo_index = wallet.goodluck if login_flag else luck_choice(0)
+    bad_todo_index = wallet.badluck if login_flag else luck_choice(1)
     if good_todo_index == bad_todo_index:
         bad_todo_index = (bad_todo_index + 1) % len(badluck)
     good_luck_msg = goodluck[good_todo_index % len(goodluck)]
@@ -244,20 +245,20 @@ async def as_login_v3(uid: int, username: str, qqname: str, nick_flag: int, avat
         luckygold_num = max(1, min(5, rp - 90))
         extra_msg += f'☆ 幸运币+{luckygold_num} (人品)\n'
         luckygold_msg += f'☆ 幸运币+{luckygold_num}\n'
-        money.increase_user_money(uid, "luckygold", luckygold_num)
+        wallet.luckygold += luckygold_num
     elif rp == 100 and not login_flag:
         luckygold_num = 10
         extra_msg += f'☆ 幸运币+{luckygold_num} (人品)\n'
         luckygold_msg += f'☆ 幸运币+{luckygold_num}\n'
-        money.increase_user_money(uid, "luckygold", luckygold_num)
+        wallet.luckygold += luckygold_num
     elif rp > 100 and not login_flag:
         luckygold_num = 20
         extra_msg += f'☆ 幸运币+{luckygold_num} (人品)\n'
         luckygold_msg += f'☆ 幸运币+{luckygold_num}\n'
-        money.increase_user_money(uid, "luckygold", luckygold_num)
+        wallet.luckygold += luckygold_num
     
     gold += rp
-    logindays = money.get_user_money(uid, "logindays") or 0
+    logindays = wallet.logindays
     star_add = min(random.randint(100 + logindays // 5 * 25, 200 + logindays // 5 * 50), 5000)
     gold_add = min(random.randint(50 + logindays // 2 * 5, 100 + logindays // 1 * 5), 2500)
     
@@ -267,12 +268,12 @@ async def as_login_v3(uid: int, username: str, qqname: str, nick_flag: int, avat
     if login_flag == 0:
         num = rp * 5 + birth_flag * 2400 + event_flag * 1600 + star_add
         gold += birth_flag * 5000 + event_flag * 3600 + gold_add
-        money.increase_user_money(uid, "starstone", num)
-        money.increase_user_money(uid, 'gold', gold)
-        money.set_user_money(uid, "last_login", int(f'{months}0{days}'))
-        money.set_user_money(uid, "rp", h)
-        money.set_user_money(uid, "goodluck", good_todo_index)
-        money.set_user_money(uid, "badluck", bad_todo_index)
+        wallet.starstone += num
+        wallet.gold += gold
+        wallet.last_login = int(f'{months}0{days}')
+        wallet.rp = h
+        wallet.goodluck = good_todo_index
+        wallet.badluck = bad_todo_index
         
         total_get_msg = f'☆ 星星+{num}\n☆ 金币+{gold}\n{luckygold_msg}'
         if logindays >= 10:
@@ -481,7 +482,7 @@ async def as_login_v3(uid: int, username: str, qqname: str, nick_flag: int, avat
 
 def get_user_gold_rank_str(current_user_id: int) -> str:
     """获取用户金币排名字符串"""
-    all_gold_data = money.get_all_user_money('gold')
+    all_gold_data = money.all('gold')
     if not all_gold_data:
         return ""
     
@@ -543,10 +544,11 @@ async def get_purse(uid: int, user_name: str, guild_flag: int = 0, avatar_url: s
     
     font_color = (116, 88, 86)
     
-    user_starstone = money.get_user_money(uid, 'starstone') or 0
-    user_gold = money.get_user_money(uid, 'gold') or 0
-    user_lucky = money.get_user_money(uid, 'luckygold') or 0
-    user_kirastone = money.get_user_money(uid, 'kirastone') or 0
+    wallet = money.of(uid)
+    user_starstone = wallet.starstone
+    user_gold = wallet.gold
+    user_lucky = wallet.luckygold
+    user_kirastone = wallet.kirastone
     
     choose_list = normal_bg_list[:]
     

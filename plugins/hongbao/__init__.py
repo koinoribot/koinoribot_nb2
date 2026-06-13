@@ -15,7 +15,7 @@ from nonebot.adapters import Event, Bot, Message
 from nonebot import logger
 from nonebot.params import CommandArg, Depends
 
-from ... import money
+from ...money import money
 from ...utils import FreqLimiter, get_double_mean_money
 from ...tools import get_uid, get_group_id_optional, get_sender_nickname
 from ...su_manager import check_su_permission, record_su_usage
@@ -67,7 +67,7 @@ def get_session(group_id: str) -> Optional[HongbaoSession]:
         # 过期返还
         return_amount = session.remaining_amount
         if return_amount > 0:
-            money.increase_user_money(session.owner_uid, 'gold', return_amount)
+            money.of(session.owner_uid).gold += return_amount
         del _sessions[group_id]
         return None
     return session
@@ -103,7 +103,7 @@ async def handle_fa_hongbao(
             # 过期处理
             return_amount = existing.remaining_amount
             if return_amount > 0:
-                money.increase_user_money(existing.owner_uid, 'gold', return_amount)
+                money.of(existing.owner_uid).gold += return_amount
             close_session(group_id)
         else:
             await fa_hongbao.finish("当前还有没领完的金币红包~")
@@ -137,12 +137,12 @@ async def handle_fa_hongbao(
         await fa_hongbao.finish(reason)
     
     # 检查用户金币
-    user_gold = money.get_user_money(uid, 'gold') or 0
+    user_gold = money.gold
     if amount > user_gold:
         await fa_hongbao.finish(f"金币不足！你只有 {user_gold} 金币")
     
     # 扣除金币
-    money.reduce_user_money(uid, 'gold', amount)
+    money.gold -= amount
     record_su_usage(uid, 'hongbao', amount)
     
     # 创建红包
@@ -193,7 +193,7 @@ async def handle_qiang_hongbao(
     if session.packets:
         amount = session.packets.pop()
         session.claimed_uids.append(uid)
-        money.increase_user_money(uid, 'gold', amount)
+        money.gold += amount
         
         await qiang_hongbao.send(f"恭喜抢到 {amount} 金币~", at_sender=True)
         
