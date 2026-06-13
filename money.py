@@ -5,14 +5,12 @@
 对业务层暴露当前用户钱包代理，例如 money.gold -= 1000。
 """
 
-import asyncio
 from contextvars import ContextVar
 import sqlite3
 import sys
 from typing import Optional, Union
-from weakref import WeakKeyDictionary
 
-from nonebot import logger
+from nonebot.log import logger
 
 from .koinori_config import get_config
 
@@ -48,21 +46,6 @@ NAME_MAP = {
 }
 
 _current_uid: ContextVar[Optional[int]] = ContextVar("koinori_money_current_uid", default=None)
-_task_uids: WeakKeyDictionary[asyncio.Task, int] = WeakKeyDictionary()
-TEMP_UID_SOURCE_LOG = True
-
-
-def _get_current_task() -> Optional[asyncio.Task]:
-    try:
-        return asyncio.current_task()
-    except RuntimeError:
-        return None
-
-
-def _bind_task_uid(uid: int):
-    task = _get_current_task()
-    if task is not None:
-        _task_uids[task] = uid
 
 
 def _find_uid_in_stack() -> Optional[int]:
@@ -77,22 +60,6 @@ def _find_uid_in_stack() -> Optional[int]:
     finally:
         del frame
     return None
-
-
-def _log_uid_source(
-    source: str,
-    uid: Optional[int],
-    stack_uid: Optional[int],
-    context_uid: Optional[int],
-    task_uid: Optional[int],
-):
-    if not TEMP_UID_SOURCE_LOG:
-        return
-    logger.info(
-        "[money-uid-source] "
-        f"source={source} uid={uid} "
-        f"stack_uid={stack_uid} context_uid={context_uid} task_uid={task_uid}"
-    )
 
 
 class _MoneyRepository:
@@ -494,25 +461,14 @@ class MoneyProxy:
     @property
     def uid(self) -> int:
         stack_uid = _find_uid_in_stack()
-        context_uid = _current_uid.get()
-        task = _get_current_task()
-        task_uid = _task_uids.get(task) if task is not None else None
-
         if stack_uid is not None:
             bind_current_uid(stack_uid)
-            _log_uid_source("stack", stack_uid, stack_uid, context_uid, task_uid)
             return stack_uid
 
+        context_uid = _current_uid.get()
         if context_uid is not None:
-            _log_uid_source("context", context_uid, stack_uid, context_uid, task_uid)
             return context_uid
 
-        if task_uid is not None:
-            _current_uid.set(task_uid)
-            _log_uid_source("task", task_uid, stack_uid, context_uid, task_uid)
-            return task_uid
-
-        _log_uid_source("missing", None, stack_uid, context_uid, task_uid)
         raise RuntimeError("当前用户 UID 未绑定，请先通过 get_uid 依赖注入或 money.bind(uid) 绑定")
 
     @property
@@ -565,14 +521,6 @@ def bind_current_uid(uid: int) -> UserWallet:
     """绑定当前上下文 UID，并返回该用户钱包。"""
     uid = int(uid)
     _current_uid.set(uid)
-    _bind_task_uid(uid)
-    if TEMP_UID_SOURCE_LOG:
-        task = _get_current_task()
-        logger.info(
-            "[money-bind] "
-            f"uid={uid} task_bound={task is not None} "
-            f"task_id={id(task) if task is not None else None}"
-        )
     return UserWallet(uid)
 
 
