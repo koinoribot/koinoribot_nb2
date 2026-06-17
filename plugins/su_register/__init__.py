@@ -5,11 +5,9 @@
 本文件不上传 git 仓库。
 
 命令:
-    注册su 激活码 - 使用激活码注册为 level 1 SU
+    注册su 激活码 - 使用激活码注册为 level 1 或 level 2 SU
 """
 
-import sqlite3
-import time
 import aiohttp
 
 from nonebot import get_driver, on_command
@@ -19,7 +17,13 @@ from nonebot.params import CommandArg, Depends
 from nonebot.plugin import PluginMetadata
 
 from ...tools import get_uid
-from ...su_manager import is_su, get_su_level, SU_LEVEL_NORMAL
+from ...su_manager import (
+    init_superusers_table,
+    is_su,
+    get_su_level,
+    register_su,
+    SU_LEVEL_TRUSTED,
+)
 
 __plugin_meta__ = PluginMetadata(
     name="su_register",
@@ -28,39 +32,7 @@ __plugin_meta__ = PluginMetadata(
 )
 
 
-def _get_db_path() -> str:
-    """获取数据库路径"""
-    from pathlib import Path
-    plugin_dir = Path(__file__).parent.parent.parent
-    return str(plugin_dir / "src" / "database" / "koinoribot.db")
-
-
-def _init_superusers_table():
-    """创建 superusers 表（如不存在）"""
-    db_path = _get_db_path()
-    conn = sqlite3.connect(db_path)
-    try:
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS superusers (
-                uid INTEGER PRIMARY KEY,
-                level INTEGER NOT NULL DEFAULT 1,
-                activated_at REAL NOT NULL,
-                activation_code TEXT,
-                daily_hongbao_used INTEGER NOT NULL DEFAULT 0,
-                daily_transfer_used INTEGER NOT NULL DEFAULT 0,
-                daily_date TEXT NOT NULL DEFAULT ''
-            )
-        """)
-        conn.commit()
-        logger.info("[su_register] superusers 表初始化完成")
-    except Exception as e:
-        logger.error(f"[su_register] superusers 表创建失败: {e}")
-    finally:
-        conn.close()
-
-
-async def _validate_activation_code(code: str, uid: int) -> bool:
+async def _validate_activation_code(code: str, uid: int) -> int | None:
     """
     验证激活码是否有效。
 
@@ -68,53 +40,21 @@ async def _validate_activation_code(code: str, uid: int) -> bool:
     """
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"http://127.0.0.1:5000/salt?uid={uid}") as resp:
+            async with session.get(
+                "http://127.0.0.1:5000/verify",
+                params={"uid": uid, "key": code},
+            ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    expected = data.get("key", "")
-                    return bool(expected) and code.lower() == expected.lower()
+                    if data.get("valid"):
+                        return data.get("level")
+                    return None
                 else:
                     logger.error(f"[su_register] 验证激活码失败，HTTP状态码: {resp.status}")
-                    return False
+                    return None
     except Exception as e:
         logger.error(f"[su_register] 验证激活码异常: {e}")
-        return False
-
-
-def _register_su(uid: int, level: int, activation_code: str) -> bool:
-    """
-    将用户注册为 SU。
-
-    Args:
-        uid: 用户 UID
-        level: 权限等级
-        activation_code: 使用的激活码
-
-    Returns:
-        True 注册成功，False 失败
-    """
-    db_path = _get_db_path()
-    conn = sqlite3.connect(db_path)
-    try:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO superusers (uid, level, activated_at, activation_code)
-            VALUES (?, ?, ?, ?)
-            """,
-            (uid, level, time.time(), activation_code)
-        )
-        conn.commit()
-        return True
-    except sqlite3.IntegrityError:
-        # 用户已存在
-        logger.warning(f"[su_register] 用户 {uid} 已是 SU，跳过注册")
-        return False
-    except Exception as e:
-        logger.error(f"[su_register] 注册 SU 失败: {e}")
-        return False
-    finally:
-        conn.close()
+        return None
 
 
 # ===== 启动时初始化表 =====
@@ -124,7 +64,7 @@ driver = get_driver()
 @driver.on_startup
 async def init_su_register():
     """初始化 SU 注册插件"""
-    _init_superusers_table()
+    init_superusers_table()
     logger.info("[su_register] SU 注册插件初始化完成")
 
 
@@ -157,18 +97,29 @@ async def handle_register_su(
         )
 
     # 验证激活码
-    if not await _validate_activation_code(activation_code, uid):
+    activation_level = await _validate_activation_code(activation_code, uid)
+    if activation_level is None:
         await register_su_cmd.finish(
             "\n激活码无效！（使用 注册激活码 可以获取你的激活码）",
             at_sender=True
         )
 
-    # 注册为 level 1 SU
-    if _register_su(uid, SU_LEVEL_NORMAL, activation_code):
+    # 注册为验证服务返回的 SU 等级
+    if register_su(uid, activation_level, activation_code):
+        if activation_level == SU_LEVEL_TRUSTED:
+            success_msg = (
+                "✅ SU 注册成功！\n"
+                f"权限等级: {activation_level}\n"
+                "注意: trusted 用户不参与排行榜。"
+            )
+        else:
+            success_msg = (
+                "✅ SU 注册成功！\n"
+                f"权限等级: {activation_level}\n"
+                "恭喜通关！"
+            )
         await register_su_cmd.finish(
-            "✅ SU 注册成功！\n"
-            f"权限等级: {SU_LEVEL_NORMAL}\n"
-            "注意: SU 用户不参与任何排行榜。",
+            success_msg,
             at_sender=True
         )
     else:

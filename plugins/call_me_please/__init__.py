@@ -15,7 +15,7 @@ from nonebot.log import logger
 from ...koinori_config import config
 from ...tools import get_uid, build_image_msg, get_sender_nickname
 from ...resources import get as get_res
-from ...su_manager import is_su, get_su_level
+from ...su_manager import is_su_contributor
 from ...nickname import get_user_nickname, set_user_nickname
 
 __plugin_meta__ = PluginMetadata(
@@ -107,7 +107,7 @@ rename_cmd = on_command("修改名称", priority=2, block=True)
 @rename_cmd.handle()
 async def handle_rename(bot: Bot, event: Event, uid: int = Depends(get_uid), args: Message = CommandArg()):
     # 鉴权：只有 SU level 0 可以使用
-    if not is_su(uid) or get_su_level(uid) != 0:
+    if not is_su_contributor(uid):
         await rename_cmd.finish("权限不足，只有最高级管理员才能使用此命令。", at_sender=True)
         
     arg_text = args.extract_plain_text().strip()

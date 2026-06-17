@@ -55,7 +55,7 @@ nonebot.load_plugin("plugins.koinoribot_nb2")
 
 - UID 是插件内部统一账号 ID，用于跨 OneBot V11 和 QQBot 保存金币、背包、宠物等数据。
 - `注册验证码` 仅支持私聊使用。获取验证码后，到另一个平台发送 `绑定账号 <验证码>`，并按提示选择保留哪个 UID。
-- SU 权限分为 level 0 和 level 1。`koinori_config.superusers` 中的 UID 视为 level 0；`注册su` 成功的用户为 level 1。
+- SU 权限分为 level 0、level 1 和 level 2。`koinori_config.superusers` 中的 UID 视为 level 0；`注册su` 根据激活码类型注册为 level 1 或 level 2。
 - 标注“SU”的命令需要 SU 权限。部分管理命令仅 level 0 可用。
 - AI 画图和 AI 修图当前仅支持 OneBot 侧发送。
 - 红包、24 点、领养云冰祈等功能仅支持群聊场景。
@@ -236,7 +236,7 @@ http://<ip_address>:8888/
 | `审核通过 <申请编号>` | SU 通过申请 |
 | `审核拒绝 <申请编号> [理由]` | SU 拒绝申请 |
 | `添加公网白名单 <主人QQ> <botQQ>` | SU 手动添加白名单 |
-| `注册su <激活码>` | 使用激活码注册为 level 1 SU |
+| `注册su <激活码>` | 使用激活码注册为 level 1 或 level 2 SU |
 
 ## 常见流程
 

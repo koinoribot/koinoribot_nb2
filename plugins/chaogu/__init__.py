@@ -52,8 +52,8 @@ from ... import uid_manager
 from ..chongwu.pet import get_user_pet, add_user_item
 # SU 权限管理
 from ...su_manager import (
-    is_su, get_su_level, get_all_su_uids, check_su_permission, record_su_usage,
-    SU_LEVEL_CONTRIBUTOR,
+    is_su, is_su_contributor, get_all_su_uids, check_su_permission,
+    record_su_usage,
 )
 __plugin_meta__ = PluginMetadata(
     name="chaogu",
@@ -1372,7 +1372,7 @@ async def handle_admin_reduce_uid(event: Event, bot: Bot, uid: int = Depends(get
     if not uid_manager.is_uid_exists(target_uid):
         await admin_reduce_uid_cmd.finish(f"找不到 UID:{target_uid} 对应的账户", at_sender=True)
 
-    if get_su_level(uid) != SU_LEVEL_CONTRIBUTOR and target_uid != uid:
+    if not is_su_contributor(uid) and target_uid != uid:
         await admin_reduce_uid_cmd.finish('权限不足', at_sender=True)
     
     target_wallet = money.of(target_uid)
@@ -1411,7 +1411,7 @@ async def handle_admin_reduce_qq(event: Event, bot: Bot, uid: int = Depends(get_
     if target_uid is None:
         await admin_reduce_qq_cmd.finish(f"找不到QQ号 {target_qq} 对应的账户", at_sender=True)
 
-    if get_su_level(uid) != SU_LEVEL_CONTRIBUTOR and target_uid != uid:
+    if not is_su_contributor(uid) and target_uid != uid:
         await admin_reduce_qq_cmd.finish('权限不足', at_sender=True)
     
     target_wallet = money.of(target_uid)

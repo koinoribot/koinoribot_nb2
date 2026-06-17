@@ -21,7 +21,7 @@ from nonebot.params import CommandArg, Depends
 from nonebot.plugin import PluginMetadata
 
 from ...money import money, get_database_path
-from ...su_manager import get_su_level, SU_LEVEL_CONTRIBUTOR
+from ...su_manager import is_su_contributor
 from ...tools import get_uid, build_image_msg, is_onebot, is_qqbot
 from ...koinori_config import config as koinori_config
 from ...utils import FreqLimiter
@@ -179,7 +179,7 @@ async def add_free_draw_count(uid: int, amount: int) -> int:
 
 async def record_draw_success(uid: int) -> None:
     """成功生成图片后递增今日次数。level 0 SU 不计入日限。"""
-    if get_su_level(uid) == SU_LEVEL_CONTRIBUTOR:
+    if is_su_contributor(uid):
         return
 
     loop = __import__("asyncio").get_event_loop()
@@ -463,7 +463,7 @@ async def generate_image_edit(
 async def check_quota_and_balance(uid: int, cmd, allow_free_draw: bool = True) -> bool:
     """检查日限和余额，任意不满足则发送提示并返回 False。"""
     # level 0 SU 不受日限
-    if get_su_level(uid) != SU_LEVEL_CONTRIBUTOR:
+    if not is_su_contributor(uid):
         ok = await check_daily_limit(uid)
         if not ok:
             await cmd.finish(f"你一天只能画 {koinori_config.daily_limit} 张图，明天再来吧~", at_sender=True)
@@ -544,7 +544,7 @@ async def ensure_draw_available(event: Event, uid: int, cmd) -> None:
         await cmd.finish("未配置 GPT-Image-2 API Key，请联系主人配置~", at_sender=True)
     if is_qqbot(event):
         await cmd.finish("AI画图功能暂不支持QQbot~", at_sender=True)
-    if not koinori_config.ai_draw_enable and get_su_level(uid) != SU_LEVEL_CONTRIBUTOR:
+    if not koinori_config.ai_draw_enable and not is_su_contributor(uid):
         await cmd.finish("AI画图功能维护中，暂时不可用~", at_sender=True)
 
 
@@ -677,7 +677,7 @@ async def do_edit(event: Event, uid: int, user_text: str) -> None:
 
 
 def _is_level0_su(uid: int) -> bool:
-    return get_su_level(uid) == SU_LEVEL_CONTRIBUTOR
+    return is_su_contributor(uid)
 
 
 @reset_all_usage_cmd.handle()
@@ -743,7 +743,7 @@ async def handle_edit(
         await edit_cmd.finish("未配置 GPT-Image-2 API Key，请联系主人配置~", at_sender=True)
     if is_qqbot(event):
         await edit_cmd.finish("AI修图功能暂不支持QQbot~", at_sender=True)
-    if not koinori_config.ai_draw_enable and get_su_level(uid) != SU_LEVEL_CONTRIBUTOR:
+    if not koinori_config.ai_draw_enable and not is_su_contributor(uid):
         await edit_cmd.finish("AI修图功能维护中，暂时不可用~", at_sender=True)
 
     user_text = args.extract_plain_text().strip()
