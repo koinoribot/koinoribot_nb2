@@ -5,7 +5,7 @@
 """
 
 import random
-from nonebot import on_command
+from nonebot import on_command, logger
 from nonebot.adapters import Event, Bot, Message
 from nonebot.params import CommandArg, Depends
 from nonebot.permission import SUPERUSER
@@ -571,7 +571,7 @@ async def handle_get_code(event: Event, bot: Bot, uid: int = Depends(get_uid)):
     code = await generate_su_code(uid)
     if not code:
         await get_code_cmd.finish("\n激活码获取失败，请稍后再试。", at_sender=True)
-    await get_code_cmd.finish(f"\n你的SU激活码：\n{code}\n\n使用方式：注册su 激活码\n(例如：注册su 123）\n（激活码当天有效，过期请重新获取）", at_sender=True)
+    await get_code_cmd.finish(f"你的SU激活码：\n{code}\n\n使用方式：注册su 激活码\n(例如：注册su 123）\n（激活码当天有效，过期请重新获取）", at_sender=True)
 
 
 # ===== 升仙榜 =====
