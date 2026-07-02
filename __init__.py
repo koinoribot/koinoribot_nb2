@@ -11,6 +11,9 @@ from nonebot import get_plugin_config, get_driver
 from nonebot.plugin import PluginMetadata
 
 from .config import Config
+from ._config_bootstrap import ensure_koinori_config
+
+_koinori_config_path, _koinori_config_created = ensure_koinori_config()
 
 # 导入核心模块
 from . import uid_manager
@@ -60,6 +63,9 @@ async def init_koinoribot():
         nonebot.logger.info(f"已加载官Bot AppID: {koinori_config.qqbot_appid}")
     else:
         nonebot.logger.warning("koinori_config 中 qqbot_appid 为空，官Bot用户昵称将显示为默认值")
+
+    if _koinori_config_created:
+        nonebot.logger.info(f"已从模板创建配置文件: {_koinori_config_path}")
     
     nonebot.logger.info("Koinoribot NB2 初始化完成")
 

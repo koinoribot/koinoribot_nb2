@@ -338,6 +338,18 @@ async def translate_prompt(api_key: str, user_text: str) -> str:
 IMAGE_API_TIMEOUT = aiohttp.ClientTimeout(total=600, connect=30, sock_read=600)
 
 
+def _get_image_response_format() -> str:
+    value = getattr(koinori_config, "gpt_image_response_format", "url")
+    normalized = str(value or "url").strip().lower()
+    if normalized in {"base64", "b64", "b64_json"}:
+        return "b64_json"
+    if normalized != "url":
+        logger.warning(
+            f"未知的 gpt_image_response_format={value!r}，已按 url 处理"
+        )
+    return "url"
+
+
 async def _read_response_body(resp: aiohttp.ClientResponse, label: str) -> bytes:
     try:
         return await resp.read()
@@ -380,7 +392,7 @@ async def _consume_image_response(
         raise RuntimeError(_append_response_debug(message, dump)) from e
 
     try:
-        image_ref = extract_image_reference(data)
+        image_ref = extract_image_reference(data, _get_image_response_format())
         if image_ref.url:
             return await _download_image_url(session, image_ref.url)
         return decode_base64_image(image_ref.b64_json or "")
@@ -430,6 +442,7 @@ async def generate_image(
         "prompt": prompt,
         "size": size,
         "quality": quality,
+        "response_format": _get_image_response_format(),
     }
 
     async with aiohttp.ClientSession(timeout=IMAGE_API_TIMEOUT) as session:
@@ -452,6 +465,7 @@ async def generate_image_edit(
     form_data.add_field("prompt", prompt)
     form_data.add_field("size", size)
     form_data.add_field("quality", quality)
+    form_data.add_field("response_format", _get_image_response_format())
     image_filename, image_content_type = detect_image_upload_meta(image_bytes)
     form_data.add_field(
         "image",

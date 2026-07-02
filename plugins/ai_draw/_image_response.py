@@ -44,7 +44,10 @@ def parse_image_response_json(body: bytes, content_type: str = "") -> dict[str, 
     return data
 
 
-def extract_image_reference(data: dict[str, Any]) -> ImageReference:
+def extract_image_reference(
+    data: dict[str, Any],
+    preferred_format: str | None = None,
+) -> ImageReference:
     api_error = data.get("error") or data.get("RelayError")
     if api_error:
         raise ImageResponseParseError(f"API returned error: {_error_message(api_error)}")
@@ -54,13 +57,21 @@ def extract_image_reference(data: dict[str, Any]) -> ImageReference:
         raise ImageResponseParseError("missing JSON field: data[0]")
 
     item = items[0]
-    url = item.get("url")
-    if isinstance(url, str) and url:
-        return ImageReference(url=url)
-
     b64_json = item.get("b64_json")
-    if isinstance(b64_json, str) and b64_json:
-        return ImageReference(b64_json=b64_json)
+    url = item.get("url")
+    has_b64_json = isinstance(b64_json, str) and b64_json
+    has_url = isinstance(url, str) and url
+
+    if _normalize_response_format(preferred_format) == "b64_json":
+        if has_b64_json:
+            return ImageReference(b64_json=b64_json)
+        if has_url:
+            return ImageReference(url=url)
+    else:
+        if has_url:
+            return ImageReference(url=url)
+        if has_b64_json:
+            return ImageReference(b64_json=b64_json)
 
     raise ImageResponseParseError("missing JSON field: data[0].url or data[0].b64_json")
 
@@ -128,6 +139,13 @@ def _shorten_base64_string(value: str) -> str:
 
 def _normalize_content_type(content_type: str) -> str:
     return (content_type or "unknown").split(";", 1)[0].strip().lower() or "unknown"
+
+
+def _normalize_response_format(value: str | None) -> str:
+    normalized = (value or "url").strip().lower()
+    if normalized in {"base64", "b64", "b64_json"}:
+        return "b64_json"
+    return "url"
 
 
 def _error_message(error: Any) -> str:

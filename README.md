@@ -35,7 +35,7 @@ nonebot.load_plugin("plugins.koinoribot_nb2")
 
 ## 配置
 
-主要配置集中在 `koinori_config.py`。
+主要配置集中在 `koinori_config.py`。仓库只保留 `koinori_config.py.template` 模板；启动时如果本地不存在 `koinori_config.py`，会自动从模板创建一份。
 
 常用项：
 
@@ -45,7 +45,7 @@ nonebot.load_plugin("plugins.koinoribot_nb2")
 - `blackusers`：冻结用户 UID 列表。
 - `dibao`、`gold_max`、`transfer_fee`、`min_rest`：经济系统参数。
 - `cool_time`、`fish_cd`、`bait_price`、`bottle_price`、`comment_price`：钓鱼和漂流瓶参数。
-- `gpt_image_api_key`、`gpt_image_api_base_url`、`gpt_image_model`：AI 画图/修图接口配置。
+- `gpt_image_api_key`、`gpt_image_api_base_url`、`gpt_image_model`、`gpt_image_response_format`：AI 画图/修图接口配置；图片返回格式可设为 `url` 或 `base64`/`b64_json`。
 - `draw_cost`、`daily_limit`、`ai_draw_enable`、`enable_gold_aidraw`、`ai_draw_size`、`shaojo_image_size`、`aidraw_quality`、`aidraw_high_quality`：画图消耗、日限、开关、尺寸与质量。
 - `public_bot`、`permit_bot`、`permit_group`、`ip_address`：公网白名单模式配置。
 
