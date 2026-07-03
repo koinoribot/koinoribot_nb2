@@ -1084,6 +1084,7 @@ async def handle_query_status(
     """用户自助查询领养审核状态"""
     external_ids = get_external_ids(uid)
     owner_qq = external_ids.get('onebot_id')
+    url = get_whitelist_web_url()
     if not owner_qq:
         await query_cmd.finish("你还没有绑定QQ号~", at_sender=True)
 
@@ -1091,7 +1092,7 @@ async def handle_query_status(
     if owner_qq in _cache_owner_to_bot:
         bot_qq = _cache_owner_to_bot[owner_qq]
         await query_cmd.finish(
-            f"你已成功领养云冰祈~\n主人QQ: {owner_qq}\nbot QQ: {bot_qq}",
+            f"你已成功领养云冰祈~\n主人QQ: {owner_qq}\nbot QQ: {bot_qq}\n配置方法请查看：{url}",
             at_sender=True
         )
 
@@ -1119,7 +1120,8 @@ async def handle_query_status(
             f"申请编号: {row[0]}\n"
             f"bot QQ: {row[1]}\n"
             f"审核状态: {status_text}\n"
-            f"申请时间: {row[6]}"
+            f"申请时间: {row[6]}\n"
+            f"你也可以访问：{url}快速查询/提前配置"
         )
         if row[2] == 'rejected':
             line += f"\n拒绝理由: {row[4] or '无'}"
