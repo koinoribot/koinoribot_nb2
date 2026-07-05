@@ -27,7 +27,8 @@ env/
 .venv/
 koinori_config.py
 /tests/
-
+/.github/
+sonar-project.properties
 # IDE
 .idea/
 .vscode/
