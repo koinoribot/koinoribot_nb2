@@ -432,27 +432,6 @@ class UserWallet:
     def _decrease(self, key: str, value: int) -> int:
         return _repository.decrease(self.uid, key, value)
 
-    def convert_kirastone(self, key: str, num: int) -> tuple[int, int]:
-        """
-        将羽毛石转换成其他资源。
-
-        Returns:
-            (消耗的羽毛石, 获得的资源)
-        """
-        if key == "gold":
-            value = num * 10
-        elif key == "starstone":
-            value = num * 10
-        elif key == "luckygold":
-            value = num // 50
-            num = value * 50
-        else:
-            value = 0
-            num = 0
-
-        self[key] += value
-        self.kirastone -= num
-        return num, value
 
 
 class MoneyProxy:
