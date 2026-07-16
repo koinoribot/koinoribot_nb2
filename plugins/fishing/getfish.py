@@ -1,19 +1,12 @@
-"""
-钓鱼核心模块 - getfish.py
-
-包含钓鱼管理类
-"""
-
 import json
 import random
 import asyncio
-from typing import Dict, Optional
+from typing import Dict
 
 from nonebot import logger
 from nonebot.adapters import Bot, Event
 from nonebot.matcher import Matcher
 from ...money import money
-from ...tools import get_uid, send_group_forward_msg, build_forward_chain
 from ...koinori_config import config
 from .util import DatabaseManager
 from .serif import GET_FISH_SERIF, NO_FISH_SERIF, COOL_TIME_SERIF
@@ -35,6 +28,68 @@ DEFAULT_INFO = {
     'statis': {'free': 0, 'sell': 0, 'total_fish': 0, 'frags': 0},
     'rod': {'current': 0, 'total_rod': [0]}
 }
+
+
+def _select_fish(second_choose: int) -> str:
+    probability_sum = 0
+    for index, probability in enumerate(PROBABILITY_2):
+        probability_sum += probability * 10
+        if second_choose <= probability_sum:
+            return FISH_LIST[index]
+    return FISH_LIST[0]
+
+
+def _lucky_gold_reward(value: int, actual_cost: int, times: int) -> int:
+    if actual_cost <= 0 or times < 100:
+        return 0
+    ratio = value / actual_cost
+    if ratio > 3:
+        return 3
+    if ratio > 2.5:
+        return 2
+    if ratio > 2:
+        return 1
+    return 0
+
+
+def _format_multi_summary(
+    command_name: str,
+    result_summary: dict[str, int],
+    auto_buy: bool,
+    cost: int,
+    value: int,
+    subsidy: int,
+    lucky_gold: int,
+    actual_cost: int,
+    star_cost: int,
+    star_price: int,
+) -> str:
+    lines = [
+        f"你的{command_name}结果：",
+        "发送 概率公示 可查活动和概率",
+    ]
+    if auto_buy:
+        lines.append(f"(已自动购买{cost}个鱼饵~)")
+    if result_summary:
+        lines.append("".join(
+            f"{fish}: {count}条"
+            for fish, count in result_summary.items()
+        ))
+    else:
+        lines.append("什么都没钓到...")
+
+    value_text = f"总价值：{value}金币"
+    if subsidy:
+        value_text += f"+{subsidy}金币(活动补贴)"
+    lines.append(value_text)
+
+    cost_text = f"总花费：{actual_cost}金币"
+    if star_price:
+        cost_text += f" {star_cost}星星"
+    lines.append(cost_text)
+    if lucky_gold:
+        lines.append(f"幸运币+{lucky_gold}")
+    return "\n".join(lines)
 
 
 
@@ -121,6 +176,27 @@ class FishingManager:
                 info[mainclass][subclass] = 0
             info[mainclass][subclass] = max(0, info[mainclass][subclass] - num)
             await cls.save_user_info(uid, info)
+
+    @classmethod
+    async def _catch_fish(cls, uid: int, user_info: dict) -> dict:
+        fish = _select_fish(random.randint(1, 1000))
+        await cls.increase_value(uid, 'fish', fish, 1, user_info)
+        await cls.increase_value(uid, 'statis', 'total_fish', 1, user_info)
+        if random.randint(1, 10) <= 5:
+            message = f'钓到了一条{fish}~'
+        else:
+            message = random.choice(GET_FISH_SERIF).format(fish)
+        return {'code': 1, 'msg': message + '\n你将鱼放进了背包。'}
+
+    @staticmethod
+    def _catch_coins(uid: int) -> dict:
+        if random.randint(1, 1000) <= 800:
+            coin_amount = random.randint(1, 30)
+            money.of(uid).gold += coin_amount
+            return {'code': 1, 'msg': f'你钓到了一个布包，里面有{coin_amount}枚金币~'}
+        coin_amount = random.randint(1, 3)
+        money.of(uid).luckygold += coin_amount
+        return {'code': 1, 'msg': f'你钓到了一个锦囊，里面有{coin_amount}枚幸运币！'}
     
     @classmethod
     async def do_fishing(cls, uid: int, skip_random_events: bool = False, user_info: dict = None) -> dict:
@@ -141,72 +217,29 @@ class FishingManager:
         if user_info is None:
             user_info = await cls.get_user_info(uid)
         
-        probability = PROBABILITY
-        probability_2 = PROBABILITY_2
-        
         first_choose = random.randint(1, 1000)
-        
-        # 跳过随机事件时的处理
         if skip_random_events:
-            if first_choose <= probability[0] * 10:
-                return {'code': 1, 'msg': random.choice(NO_FISH_SERIF)}
-            elif first_choose <= (probability[1] + probability[0]) * 10:
-                return {'code': 1, 'msg': random.choice(NO_FISH_SERIF)}
-            elif first_choose <= (probability[2] + probability[1] + probability[0]) * 10:
-                # 钓到鱼
-                second_choose = random.randint(1, 1000)
-                prob_sum = 0
-                fish = FISH_LIST[0]
-                for i, prob in enumerate(probability_2):
-                    prob_sum += prob * 10
-                    if second_choose <= prob_sum and i < len(FISH_LIST):
-                        fish = FISH_LIST[i]
-                        break
-                
-                await cls.increase_value(uid, 'fish', fish, 1, user_info)
-                await cls.increase_value(uid, 'statis', 'total_fish', 1, user_info)
-                msg = f'钓到了一条{fish}~' if random.randint(1, 10) <= 5 else random.choice(GET_FISH_SERIF).format(fish)
-                return {'code': 1, 'msg': msg + '\n你将鱼放进了背包。'}
-            else:
-                return {'code': 1, 'msg': random.choice(NO_FISH_SERIF)}
-        
-        # 正常钓鱼
-        if first_choose <= probability[0] * 10:
+            fish_start = (PROBABILITY[0] + PROBABILITY[1]) * 10
+            fish_end = fish_start + PROBABILITY[2] * 10
+            if fish_start < first_choose <= fish_end:
+                return await cls._catch_fish(uid, user_info)
             return {'code': 1, 'msg': random.choice(NO_FISH_SERIF)}
-        elif first_choose <= (probability[1] + probability[0]) * 10:
-            # 随机事件 - 简化为获得漂流瓶
+
+        empty_end = PROBABILITY[0] * 10
+        event_end = empty_end + PROBABILITY[1] * 10
+        fish_end = event_end + PROBABILITY[2] * 10
+        coin_end = fish_end + PROBABILITY[3] * 10
+        if first_choose <= empty_end:
+            return {'code': 1, 'msg': random.choice(NO_FISH_SERIF)}
+        if first_choose <= event_end:
             await cls.increase_value(uid, 'fish', '✉', 1, user_info)
             return {'code': 1, 'msg': '你的鱼钩碰到了一个空漂流瓶！可以使用"扔漂流瓶+内容"使用它'}
-        elif first_choose <= (probability[2] + probability[1] + probability[0]) * 10:
-            # 钓到鱼
-            second_choose = random.randint(1, 1000)
-            prob_sum = 0
-            fish = FISH_LIST[0]
-            for i, prob in enumerate(probability_2):
-                prob_sum += prob * 10
-                if second_choose <= prob_sum and i < len(FISH_LIST):
-                    fish = FISH_LIST[i]
-                    break
-            
-            await cls.increase_value(uid, 'fish', fish, 1, user_info)
-            await cls.increase_value(uid, 'statis', 'total_fish', 1, user_info)
-            msg = f'钓到了一条{fish}~' if random.randint(1, 10) <= 5 else random.choice(GET_FISH_SERIF).format(fish)
-            return {'code': 1, 'msg': msg + '\n你将鱼放进了背包。'}
-        elif first_choose <= (probability[3] + probability[2] + probability[1] + probability[0]) * 10:
-            # 钓到金币
-            second_choose = random.randint(1, 1000)
-            if second_choose <= 800:
-                coin_amount = random.randint(1, 30)
-                money.of(uid).gold += coin_amount
-                return {'code': 1, 'msg': f'你钓到了一个布包，里面有{coin_amount}枚金币~'}
-            else:
-                coin_amount = random.randint(1, 3)
-                money.of(uid).luckygold += coin_amount
-                return {'code': 1, 'msg': f'你钓到了一个锦囊，里面有{coin_amount}枚幸运币！'}
-        else:
-            # 钓到水之心
-            await cls.increase_value(uid, 'fish', '🔮', 1, user_info)
-            return {'code': 2, 'msg': '你发现鱼竿有着异于平常的感觉，竟然钓到了一颗水之心🔮~'}
+        if first_choose <= fish_end:
+            return await cls._catch_fish(uid, user_info)
+        if first_choose <= coin_end:
+            return cls._catch_coins(uid)
+        await cls.increase_value(uid, 'fish', '🔮', 1, user_info)
+        return {'code': 2, 'msg': '你发现鱼竿有着异于平常的感觉，竟然钓到了一颗水之心🔮~'}
     
     @classmethod
     def cal_all_fish_value(cls, result: Dict[str, int]) -> int:
@@ -216,6 +249,135 @@ class FishingManager:
             if fish in FISH_PRICE:
                 total_value += count * FISH_PRICE[fish]
         return total_value
+
+    @classmethod
+    async def _prepare_multi_fishing(
+        cls,
+        uid: int,
+        matcher: Matcher,
+        wallet,
+        cost: int,
+        star_cost: int,
+        actual_cost: int,
+        cooldown_manager,
+    ):
+        if config.star_price and wallet.starstone < star_cost:
+            await matcher.finish("星星不够用了呢...", at_sender=True)
+
+        user_info = await cls.get_user_info(uid)
+        if cooldown_manager.left_time(uid) > 0:
+            remaining = int(cooldown_manager.left_time(uid))
+            await matcher.finish(random.choice(COOL_TIME_SERIF) + f'({remaining}s)')
+
+        auto_buy = user_info['fish'].get('🍙', 0) < cost
+        if auto_buy:
+            if wallet.gold < actual_cost:
+                await matcher.finish("金币或鱼饵不足喔...", at_sender=True)
+            wallet.gold -= actual_cost
+        return user_info, auto_buy
+
+    @staticmethod
+    async def _check_multi_fishing_limit(
+        uid: int,
+        times: int,
+        matcher: Matcher,
+        wallet,
+        actual_cost: int,
+        auto_buy: bool,
+    ) -> bool:
+        allowed = DatabaseManager.check_and_update_fish_limit(uid, times)
+        fish_count, limit_count = DatabaseManager.get_user_fish_count_today(uid)
+        if is_su(uid) or allowed:
+            return True
+
+        rest_count = limit_count - fish_count
+        await matcher.send(
+            f'\n今日钓鱼次数已达上限喔...你还能钓鱼{rest_count}次。\n明天再来吧~',
+            at_sender=True,
+        )
+        if auto_buy:
+            wallet.gold += actual_cost
+        return False
+
+    @classmethod
+    async def _consume_multi_fishing_costs(
+        cls,
+        uid: int,
+        wallet,
+        user_info: dict,
+        auto_buy: bool,
+        cost: int,
+        star_cost: int,
+    ):
+        if config.star_price:
+            wallet.starstone -= star_cost
+        if not auto_buy:
+            await cls.decrease_value(uid, "fish", "🍙", cost, user_info)
+
+    @classmethod
+    async def _collect_multi_fishing_results(
+        cls,
+        uid: int,
+        times: int,
+        user_info: dict,
+    ) -> tuple[Dict[str, int], bool]:
+        result_summary: Dict[str, int] = {}
+        for _ in range(times):
+            response = await cls.do_fishing(
+                uid,
+                skip_random_events=True,
+                user_info=user_info,
+            )
+            if response["code"] != 1:
+                continue
+            fish = next(
+                (item for item in FISH_LIST if item in response["msg"]),
+                None,
+            )
+            if fish:
+                result_summary[fish] = result_summary.get(fish, 0) + 1
+        return result_summary, '🌟' in result_summary
+
+    @staticmethod
+    def _apply_multi_fishing_rewards(
+        wallet,
+        value: int,
+        actual_cost: int,
+        times: int,
+        have_star: bool,
+    ) -> tuple[int, int]:
+        subsidy = 300 if not have_star and config.extra_gold == 1 and times == 100 else 0
+        wallet.gold += subsidy
+        lucky_gold = _lucky_gold_reward(value, actual_cost, times)
+        wallet.luckygold += lucky_gold
+        return subsidy, lucky_gold
+
+    @staticmethod
+    def _multi_fishing_count_message(uid: int) -> str:
+        if is_su(uid):
+            return ""
+        fish_count, limit_count = DatabaseManager.get_user_fish_count_today(uid)
+        return (
+            f"今日已钓鱼：{fish_count}次\n"
+            f"剩余次数：{limit_count - fish_count}次"
+        )
+
+    @staticmethod
+    async def _send_multi_fishing_result(
+        matcher: Matcher,
+        summary_message: str,
+        count_message: str,
+    ):
+        forward_messages = [summary_message]
+        if count_message:
+            forward_messages.append(count_message)
+        try:
+            await matcher.send("\n\n".join(forward_messages))
+        except Exception as error:
+            logger.error(f"发送合并转发消息失败: {error}，降级为普通消息")
+            await matcher.send(summary_message)
+            if count_message:
+                await matcher.send(count_message)
 
     @classmethod
     async def multi_fishing(cls, uid:int, matcher: Matcher, bot: Bot, event: Event,
@@ -237,145 +399,64 @@ class FishingManager:
         """
 
         wallet = money.of(uid)
-
-        # 检查星星
-        if config.star_price != 0:
-            user_starstone = wallet.starstone
-            if user_starstone < star_cost:
-                await matcher.finish("星星不够用了呢...", at_sender=True)
-
-        user_info = await cls.get_user_info(uid)
         actual_cost = cost * config.bait_price
-
-        # 冷却检测
-        if cooldown_manager.left_time(uid) > 0:
-            await matcher.finish(random.choice(COOL_TIME_SERIF) + f'({int(cooldown_manager.left_time(uid))}s)')
-
-        auto_buy = False
-        # 检查鱼饵
-        if user_info['fish'].get('🍙', 0) < cost:
-            user_gold = wallet.gold
-            if user_gold >= actual_cost:
-                wallet.gold -= actual_cost
-                auto_buy = True
-            else:
-                await matcher.finish("金币或鱼饵不足喔...", at_sender=True)
-
-        # 检查次数限制
-        limit = DatabaseManager.check_and_update_fish_limit(uid, times)
-        fish_count, limit_count = DatabaseManager.get_user_fish_count_today(uid)
-        rest_count = limit_count - fish_count
-
-        if not is_su(uid) and not limit:
-            await matcher.send(f'\n今日钓鱼次数已达上限喔...你还能钓鱼{rest_count}次。\n明天再来吧~', at_sender=True)
-            if auto_buy:
-                wallet.gold += actual_cost
+        user_info, auto_buy = await cls._prepare_multi_fishing(
+            uid,
+            matcher,
+            wallet,
+            cost,
+            star_cost,
+            actual_cost,
+            cooldown_manager,
+        )
+        if not await cls._check_multi_fishing_limit(
+            uid,
+            times,
+            matcher,
+            wallet,
+            actual_cost,
+            auto_buy,
+        ):
             return
 
         cooldown_manager.start_cd(uid)
-
-        # 扣星星
-        if config.star_price != 0:
-            wallet.starstone -= star_cost
-
-        # 消耗鱼饵
-        if not auto_buy:
-            await cls.decrease_value(uid, "fish", "🍙", cost, user_info)
-
-        # 执行多次钓鱼
-        result_summary: Dict[str, int] = {}
-        have_star = False
-
-        for _ in range(times):
-            resp = await cls.do_fishing(uid, skip_random_events=True, user_info=user_info)
-            if resp["code"] == 1:
-                msg = resp["msg"]
-                for fish in FISH_LIST:
-                    if fish in msg:
-                        result_summary[fish] = result_summary.get(fish, 0) + 1
-                        if fish == '🌟':
-                            have_star = True
-
-        # 保存数据
+        await cls._consume_multi_fishing_costs(
+            uid,
+            wallet,
+            user_info,
+            auto_buy,
+            cost,
+            star_cost,
+        )
+        result_summary, have_star = await cls._collect_multi_fishing_results(
+            uid,
+            times,
+            user_info,
+        )
         await cls.save_user_info(uid, user_info)
-
-        # 计算价值
         value = cls.cal_all_fish_value(result_summary)
-
-        # ===== 构建钓鱼结果消息（放入合并转发） =====
-        summary_message = f"你的{command_name}结果：\n"
-        summary_message += f"发送 概率公示 可查活动和概率\n"
-        if auto_buy:
-            summary_message += f"(已自动购买{cost}个鱼饵~)\n"
-
-        if result_summary:
-            summary_message += "".join(f"{fish}: {count}条" for fish, count in result_summary.items())
-        else:
-            summary_message += "什么都没钓到..."
-
-        summary_message += f"\n总价值：{value}金币"
-
-        # 活动补贴
-        if not have_star and config.extra_gold == 1 and times == 100:
-            wallet.gold += 300
-            summary_message += f"+300金币(活动补贴)"
-
-        summary_message += f"\n总花费：{actual_cost}金币"
-        if config.star_price != 0:
-            summary_message += f" {star_cost}星星"
-
-        # 幸运币奖励
-        if actual_cost > 0 and times >= 100:
-            ratio = value / actual_cost
-            if ratio > 3:
-                wallet.luckygold += 3
-                summary_message += "\n幸运币+3"
-            elif ratio > 2.5:
-                wallet.luckygold += 2
-                summary_message += "\n幸运币+2"
-            elif ratio > 2:
-                wallet.luckygold += 1
-                summary_message += "\n幸运币+1"
-
-        # ===== 构建次数统计消息（放入合并转发） =====
-        count_message = ""
-        if not is_su(uid):
-            fish_count, limit_count = DatabaseManager.get_user_fish_count_today(uid)
-            rest_count = limit_count - fish_count
-            count_message = f"今日已钓鱼：{fish_count}次\n剩余次数：{rest_count}次"
-
-        # ===== 构建价值汇总消息（单独发送） =====
-        value_message = f"总价值：{value}金币"
-        if not have_star and config.extra_gold == 1 and times == 100:
-            actual_value = value + 300
-            value_message = f"总价值：{actual_value}金币"
-        value_message += f"\n总花费：{actual_cost}金币"
-        if config.star_price != 0:
-            value_message += f" {star_cost}星星"
-        if actual_cost > 0 and times >= 100:
-            ratio = value / actual_cost
-            if ratio > 3:
-                value_message += " 幸运币+3"
-            elif ratio > 2.5:
-                value_message += " 幸运币+2"
-            elif ratio > 2:
-                value_message += " 幸运币+1"
-
-        # ===== 发送合并转发消息（钓鱼结果 + 次数统计） =====
-        forward_msgs = [summary_message]
-        if count_message:
-            forward_msgs.append(count_message)
-
-        try:
-            #chain = await build_forward_chain(bot, forward_msgs)
-            #await send_group_forward_msg(event, bot, chain)
-            await matcher.send("\n\n".join(forward_msgs))
-        except Exception as e:
-            logger.error(f"发送合并转发消息失败: {e}，降级为普通消息")
-            await matcher.send(summary_message)
-            if count_message:
-                await matcher.send(count_message)
-
-        # ===== 单独发送价值汇总 =====
-        #await asyncio.sleep(0.5)
-        #await matcher.finish(value_message, at_sender=True)
+        subsidy, lucky_gold = cls._apply_multi_fishing_rewards(
+            wallet,
+            value,
+            actual_cost,
+            times,
+            have_star,
+        )
+        summary_message = _format_multi_summary(
+            command_name,
+            result_summary,
+            auto_buy,
+            cost,
+            value,
+            subsidy,
+            lucky_gold,
+            actual_cost,
+            star_cost,
+            config.star_price,
+        )
+        count_message = cls._multi_fishing_count_message(uid)
+        await cls._send_multi_fishing_result(
+            matcher,
+            summary_message,
+            count_message,
+        )

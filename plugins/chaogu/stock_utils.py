@@ -1,9 +1,3 @@
-"""
-股票工具模块
-
-处理股票数据、持仓、价格、图表生成等数据库操作
-"""
-
 import json
 import os
 import sqlite3
@@ -349,7 +343,7 @@ async def update_user_portfolio(user_id: int, stock_name: str, change_amount: in
                 logger.info(f"[chaogu] Found existing portfolio: {portfolio}")
             else:
                 portfolio = {}
-                logger.info(f"[chaogu] No existing portfolio, creating new one")
+                logger.info("[chaogu] No existing portfolio, creating new one")
             
             current = portfolio.get(_stock_name, 0)
             new_amount = current + _change_amount
@@ -358,7 +352,7 @@ async def update_user_portfolio(user_id: int, stock_name: str, change_amount: in
             
             if new_amount < 0:
                 conn.close()
-                logger.warning(f"[chaogu] new_amount < 0, returning False")
+                logger.warning("[chaogu] new_amount < 0, returning False")
                 return False
             
             if new_amount == 0:
@@ -515,7 +509,7 @@ def generate_stock_chart(stock_name: str, history: List[tuple], stock_data: Dict
                         xy=(event_time, event["old_price"]),
                         xytext=(0, -30),
                         textcoords='offset points',
-                        arrowprops=dict(facecolor='black', arrowstyle='->'),
+                        arrowprops={'facecolor': 'black', 'arrowstyle': '->'},
                         ha='center',
                         fontsize=9,
                         fontproperties=font_prop
@@ -543,8 +537,13 @@ def generate_stock_chart(stock_name: str, history: List[tuple], stock_data: Dict
             xy=(dates[-1], current_price),
             xytext=(30, -30),
             textcoords='offset points',
-            arrowprops=dict(facecolor='black', arrowstyle='->'),
-            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="black", alpha=0.8),
+            arrowprops={'facecolor': 'black', 'arrowstyle': '->'},
+            bbox={
+                'boxstyle': "round,pad=0.3",
+                'fc': "white",
+                'ec': "black",
+                'alpha': 0.8,
+            },
             fontproperties=font_prop
         )
 
@@ -627,7 +626,6 @@ async def get_user_gamble_record(uid: int) -> dict:
 
 
 async def check_daily_gamble_limit(uid: int) -> bool:
-    """检查用户今天是否还可以赌博（True=可以，False=今天已赌过）"""
     from datetime import date
     init_stock_database()
     
@@ -741,7 +739,6 @@ async def record_turntable_spin(uid: int) -> int:
 # ===== 低保领取记录相关函数 =====
 
 async def check_daily_prek(uid: int) -> bool:
-    """检查用户今天是否已领低保（True=可以领，False=已领过）"""
     from datetime import date
     init_stock_database()
     

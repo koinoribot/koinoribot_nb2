@@ -8,7 +8,7 @@
 import random
 import time
 import math
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 from nonebot import on_command, get_driver
@@ -44,12 +44,15 @@ __plugin_meta__ = PluginMetadata(
     usage="宠物帮助 / 开启扭蛋 / 我的宠物 等",
 )
 
+NO_PET_MESSAGE = "你还没有宠物！"
+ORIGINAL_CONTRACT_ITEM = "最初的契约"
+
 
 # ===== 宠物帮助 =====
 pet_help_cmd = on_command("宠物帮助", priority=5, block=True)
 
 # 宠物帮助内容（迁移自old_bot完整版）
-pet_help = """
+pet_help = f"""
 宠物养成系统帮助：
 【扭蛋系统】
 1. 购买普通/高级/传说扭蛋 [数量] - 购买宠物扭蛋
@@ -64,7 +67,7 @@ pet_help = """
 4. 宠物背包 - 查看拥有的宠物用品
 5. 投喂 [料理名称] [数量（可选）] 
 6. 丟玩具球 - 消耗【玩具球】
-7. 寻回宠物 - 消耗【最初的契约】
+7. 寻回宠物 - 消耗【{ORIGINAL_CONTRACT_ITEM}】
 8. 重置进化路线 - 消耗【时之泪】
 9. 进化宠物 - 消耗1个 【奶油蛋糕/豪华蛋糕】
 10. 补充精力 - 消耗1个 【能量饮料】
@@ -153,6 +156,71 @@ async def handle_sell_kirastone(
 # ===== 开启扭蛋 =====
 open_gacha_cmd = on_command("开启", priority=5, block=True)
 
+
+async def _finish_existing_pet_gacha(
+    uid: int,
+    pet_data: dict,
+    gacha_name: str,
+) -> None:
+    if "temp_data" in pet_data:
+        await add_user_item(uid, gacha_name)
+        await open_gacha_cmd.finish(
+            f"你已有一只宠物({pet_data['type']})等待领养，请先领养或放弃。",
+            at_sender=True,
+        )
+        return
+    if random.random() < 0.9:
+        money.gold += GACHA_CONSOLE_PRIZE
+        await open_gacha_cmd.finish(
+            f"你已经有宠物了，本次扭蛋里没有宠物，获得{GACHA_CONSOLE_PRIZE}金币安慰奖...",
+            at_sender=True,
+        )
+        return
+    money.luckygold += 1
+    await open_gacha_cmd.finish(
+        "你已经有宠物了，本次扭蛋里没有宠物，但有1枚幸运币...",
+        at_sender=True,
+    )
+
+
+def _select_gacha_pool(gacha_name: str) -> Optional[dict]:
+    if gacha_name == "传说扭蛋":
+        return GACHA_REWARDS["传说"]
+    if gacha_name == "高级扭蛋":
+        roll = random.random() * 100
+        if roll < 55:
+            return GACHA_REWARDS["稀有"]
+        if roll < 90:
+            return GACHA_REWARDS["史诗"]
+        return GACHA_REWARDS["传说"]
+    if random.random() < 0.5:
+        return None
+
+    roll = random.random() * 100
+    if roll < 55:
+        return GACHA_REWARDS["普通"]
+    if roll < 80:
+        return GACHA_REWARDS["稀有"]
+    if roll < 98:
+        return GACHA_REWARDS["史诗"]
+    return GACHA_REWARDS["传说"]
+
+
+async def _finish_empty_gacha() -> None:
+    if random.random() < 0.8:
+        money.gold += GACHA_CONSOLE_PRIZE
+        await open_gacha_cmd.finish(
+            f"扭蛋里没有宠物，获得{GACHA_CONSOLE_PRIZE}金币安慰奖...",
+            at_sender=True,
+        )
+        return
+    money.luckygold += 1
+    await open_gacha_cmd.finish(
+        "扭蛋里没有宠物，但有1枚幸运币...",
+        at_sender=True,
+    )
+
+
 @open_gacha_cmd.handle()
 async def handle_open_gacha(
     event: Event, bot: Bot, 
@@ -171,67 +239,28 @@ async def handle_open_gacha(
     
     pet_data = await get_user_pet(uid)
     if pet_data:
-        if "temp_data" in pet_data:
-            await add_user_item(uid, gacha_name)
-            await open_gacha_cmd.finish(f"你已有一只宠物({pet_data['type']})等待领养，请先领养或放弃。", at_sender=True)
-        else:
-            if random.random() < 0.9:
-                money.gold += GACHA_CONSOLE_PRIZE
-                await open_gacha_cmd.finish(f"你已经有宠物了，本次扭蛋里没有宠物，获得{GACHA_CONSOLE_PRIZE}金币安慰奖...", at_sender=True)
-            else:
-                money.luckygold += 1
-                await open_gacha_cmd.finish("你已经有宠物了，本次扭蛋里没有宠物，但有1枚幸运币...", at_sender=True)
-    
-    pet_type = None
-    pool = None
-    
-    if gacha_name == "传说扭蛋":
-        pool = GACHA_REWARDS["传说"]
-    elif gacha_name == "高级扭蛋":
-        roll = random.random() * 100
-        if roll < 55:
-            pool = GACHA_REWARDS["稀有"]
-        elif roll < 90:
-            pool = GACHA_REWARDS["史诗"]
-        else:
-            pool = GACHA_REWARDS["传说"]
-    else:
-        if random.random() < 0.5:
-            if random.random() < 0.8:
-                money.gold += GACHA_CONSOLE_PRIZE
-                await open_gacha_cmd.finish(f"扭蛋里没有宠物，获得{GACHA_CONSOLE_PRIZE}金币安慰奖...", at_sender=True)
-            else:
-                money.luckygold += 1
-                await open_gacha_cmd.finish("扭蛋里没有宠物，但有1枚幸运币...", at_sender=True)
-        
-        roll = random.random() * 100
-        if roll < 55:
-            pool = GACHA_REWARDS["普通"]
-        elif roll < 80:
-            pool = GACHA_REWARDS["稀有"]
-        elif roll < 98:
-            pool = GACHA_REWARDS["史诗"]
-        else:
-            pool = GACHA_REWARDS["传说"]
-    
-    if pool:
-        pet_type = random.choices(list(pool.keys()), weights=list(pool.values()))[0]
-    
-    if pet_type:
-        temp_pet = {
-            "type": pet_type,
-            "temp_data": True,
-            "gacha_time": time.time()
-        }
-        await update_user_pet(uid, temp_pet)
-        pet_data = get_pet_data()
-        rarity = pet_data[pet_type]["rarity"]
-        await open_gacha_cmd.finish(
-            f"🎉 恭喜！从[{gacha_name}]中抽中了{rarity}宠物【{pet_type}】！\n"
-            f"请使用'领养宠物 [名字]'来领养她，或使用'放弃宠物'放弃。", at_sender=True)
-    else:
-        money.gold += GACHA_CONSOLE_PRIZE
-        await open_gacha_cmd.finish(f"很遗憾，没有抽中宠物，获得{GACHA_CONSOLE_PRIZE}金币安慰奖！", at_sender=True)
+        return await _finish_existing_pet_gacha(uid, pet_data, gacha_name)
+
+    pool = _select_gacha_pool(gacha_name)
+    if pool is None:
+        return await _finish_empty_gacha()
+
+    pet_type = random.choices(
+        list(pool),
+        weights=list(pool.values()),
+    )[0]
+    temp_pet = {
+        "type": pet_type,
+        "temp_data": True,
+        "gacha_time": time.time(),
+    }
+    await update_user_pet(uid, temp_pet)
+    rarity = get_pet_data()[pet_type]["rarity"]
+    await open_gacha_cmd.finish(
+        f"🎉 恭喜！从[{gacha_name}]中抽中了{rarity}宠物【{pet_type}】！\n"
+        f"请使用'领养宠物 [名字]'来领养她，或使用'放弃宠物'放弃。",
+        at_sender=True,
+    )
 
 
 # ===== 领养宠物 =====
@@ -314,7 +343,7 @@ async def handle_my_pet(event: Event, bot: Bot, uid: int = Depends(get_uid)):
     if pet.get("temp_data"):
         await my_pet_cmd.finish(f"你有一只待领养的{pet['type']}，请使用'领养宠物 [名字]'来领养！", at_sender=True)
     
-    pet = await update_pet_status(pet)
+    pet = update_pet_status(pet)
     await update_user_pet(uid, pet)
     
     stage_names = ["幼年体", "成长体", "成年体"]
@@ -522,15 +551,15 @@ async def handle_feed(
 
     pet = await get_user_pet(uid)
     if not pet or pet.get("temp_data"):
-        await feed_cmd.finish("你还没有宠物！", at_sender=True)
+        await feed_cmd.finish(NO_PET_MESSAGE, at_sender=True)
     
-    pet = await update_pet_status(pet)
+    pet = update_pet_status(pet)
     if pet.get("runaway"):
         await feed_cmd.finish(f"你的宠物【{pet['name']}】离家出走了，无法投喂！", at_sender=True)
     
     # 扣除物品
     if not await use_user_item(uid, food_type, quantity):
-         await feed_cmd.finish(f"扣除物品失败，请稍后再试。", at_sender=True)
+         await feed_cmd.finish("扣除物品失败，请稍后再试。", at_sender=True)
 
     item = PET_SHOP_ITEMS[food_type]
     
@@ -561,10 +590,10 @@ pat_cmd = on_command("摸摸宠物", priority=5, block=True)
 async def handle_pat(event: Event, bot: Bot, uid: int = Depends(get_uid)):
     pet = await get_user_pet(uid)
     if not pet or pet.get("temp_data"):
-        await pat_cmd.finish("你还没有宠物！", at_sender=True)
-    
-    pet = await update_pet_status(pet)
-    
+        await pat_cmd.finish(NO_PET_MESSAGE, at_sender=True)
+
+    pet = update_pet_status(pet)
+
     if pet["energy"] < 20:
         await pat_cmd.finish(f"{pet['name']}太累了，需要休息！", at_sender=True)
     
@@ -587,9 +616,9 @@ async def handle_energy(event: Event, bot: Bot, uid: int = Depends(get_uid)):
     pet = await get_user_pet(uid)
     if not pet or pet.get("temp_data"):
         await add_user_item(uid, "能量饮料")
-        await energy_cmd.finish("你还没有宠物！", at_sender=True)
+        await energy_cmd.finish(NO_PET_MESSAGE, at_sender=True)
     
-    pet = await update_pet_status(pet)
+    pet = update_pet_status(pet)
     if pet.get("runaway"):
         await add_user_item(uid, "能量饮料")
         await energy_cmd.finish(f"你的宠物【{pet['name']}】离家出走了！", at_sender=True)
@@ -613,9 +642,9 @@ async def handle_throw_ball(event: Event, bot: Bot, uid: int = Depends(get_uid))
     pet = await get_user_pet(uid)
     if not pet or pet.get("temp_data"):
         await add_user_item(uid, "玩具球")
-        await energy_cmd.finish("你还没有宠物！", at_sender=True)
+        await energy_cmd.finish(NO_PET_MESSAGE, at_sender=True)
     
-    pet = await update_pet_status(pet)
+    pet = update_pet_status(pet)
     if pet.get("runaway"):
         await add_user_item(uid, "玩具球")
         await energy_cmd.finish(f"你的宠物【{pet['name']}】离家出走了！", at_sender=True)
@@ -640,16 +669,16 @@ async def handle_learn_skill(event: Event, bot: Bot, uid: int = Depends(get_uid)
     pet = await get_user_pet(uid)
     if not pet or pet.get("temp_data"):
         await add_user_item(uid, "技能药水")
-        await learn_skill_cmd.finish("你还没有宠物！", at_sender=True)
+        await learn_skill_cmd.finish(NO_PET_MESSAGE, at_sender=True)
     
-    pet = await update_pet_status(pet)
+    pet = update_pet_status(pet)
     if pet.get("runaway"):
         await add_user_item(uid, "技能药水")
         await learn_skill_cmd.finish(f"你的宠物【{pet['name']}】离家出走了！", at_sender=True)
     
     available_skills = [s for s in PET_SKILLS.keys() if s not in pet.get("skills", [])]
     if not available_skills:
-        await learn_skill_cmd.finish(f"你的宠物已学会所有技能！", at_sender=True)
+        await learn_skill_cmd.finish("你的宠物已学会所有技能！", at_sender=True)
     
     max_skills = 1 + pet["stage"] * 2
     status = min(pet["max_hunger"], pet["max_happiness"], pet["max_energy"])
@@ -690,9 +719,9 @@ async def handle_forget_skill(
     pet = await get_user_pet(uid)
     if not pet or pet.get("temp_data"):
         await add_user_item(uid, "遗忘药水")
-        await forget_skill_cmd.finish("你还没有宠物！", at_sender=True)
+        await forget_skill_cmd.finish(NO_PET_MESSAGE, at_sender=True)
 
-    pet = await update_pet_status(pet)
+    pet = update_pet_status(pet)
     if pet.get("runaway"):
         await add_user_item(uid, "遗忘药水")
         await forget_skill_cmd.finish(f"你的宠物【{pet['name']}】离家出走了！", at_sender=True)
@@ -712,6 +741,72 @@ async def handle_forget_skill(
 # ===== 宠物事件 =====
 pet_event_cmd = on_command("宠物事件", priority=5, block=True)
 
+
+def _pet_event_date(value) -> Optional[date]:
+    try:
+        if isinstance(value, (int, float)):
+            return datetime.fromtimestamp(value).date()
+        if isinstance(value, str):
+            return datetime.strptime(value, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
+async def _apply_pet_skill(skill_name: str, pet: dict, uid: int) -> str:
+    pet_name = pet["name"]
+    if skill_name == "宝石爱好者":
+        amount = random.randint(1, 20)
+        money.kirastone += amount
+        return f"\n{pet_name}外出玩耍时偶遇无人看守的宝石矿井，偷偷捡回了{amount}枚宝石。"
+    if skill_name == "盼望长大":
+        growth_gain = 10
+        pet["growth"] = min(
+            pet.get("growth_required", math.inf),
+            pet["growth"] + growth_gain,
+        )
+        return f"\n{pet_name}很喜欢你，决定要努力长大来报答你，成长值+{growth_gain}。"
+    if skill_name == "金币爱好者":
+        amount = random.randint(1000, 20000)
+        money.gold += amount
+        return f"\n{pet_name}外出玩耍时捡到了一个钱包，里面有{amount}金币。"
+    if skill_name == "幸运星":
+        amount = random.randint(5, 7)
+        money.luckygold += amount
+        return f"\n{pet_name}外出玩耍时偶遇音祈，由于可爱的外表，深受对方喜爱，获得了上帝的祝福。幸运币+{amount}。"
+    if skill_name == "卖萌":
+        amount = random.randint(100, 2000)
+        money.starstone += amount
+        return f"\n{pet_name}外出玩耍时偶遇梦灵，由于太可爱了，被大小姐rua了个爽，并收获了大量好感度（星星+{amount}）。"
+    if skill_name == "美食家":
+        food_item = random.choice(
+            ["普通料理", "高级料理", "豪华料理", "能量饮料"]
+        )
+        await add_user_item(uid, food_item, 1)
+        return f"\n{pet_name}外出玩耍时偶遇商店的抽奖活动，赢得了{food_item}。"
+    if skill_name == "自我管理":
+        energy_gain = random.randint(10, 80)
+        happiness_gain = random.randint(10, 80)
+        pet["energy"] = min(
+            pet["max_energy"],
+            pet["energy"] + energy_gain,
+        )
+        pet["happiness"] = min(
+            pet["max_happiness"],
+            pet["happiness"] + happiness_gain,
+        )
+        return (
+            f"\n{pet_name}已经习惯了你早出晚归的生活，她知道你赚金币养她很不容易。"
+            f"通过自我情绪管理，她恢复{energy_gain}精力和{happiness_gain}好感。"
+        )
+    if skill_name == "捕鱼达人":
+        species_buff = 2 if "猫" in pet["type"] else 1
+        add_count = random.randint(1, 5) * 100 * (3 ** pet["stage"]) * species_buff
+        DatabaseManager.check_and_update_fish_limit(uid, -add_count)
+        return f"\n{pet_name}在捕鱼大赛中名列前茅，赢得了鱼塘的特邀入场券。今日钓鱼次数+{add_count}。"
+    return f"【{skill_name}】是未知技能，无法发动。"
+
+
 @pet_event_cmd.handle()
 async def handle_pet_event(event: Event, bot: Bot, uid: int = Depends(get_uid)):
 
@@ -719,25 +814,15 @@ async def handle_pet_event(event: Event, bot: Bot, uid: int = Depends(get_uid)):
 
     pet = await get_user_pet(uid)
     if not pet or pet.get("temp_data"):
-        await pet_event_cmd.finish("你还没有宠物！", at_sender=True)
+        await pet_event_cmd.finish(NO_PET_MESSAGE, at_sender=True)
 
     # 先更新一次宠物状态，处理自然衰减等
-    pet = await update_pet_status(pet)
+    pet = update_pet_status(pet)
 
     if pet.get("runaway"):
         await pet_event_cmd.finish(f"你的宠物【{pet['name']}】离家出走了，无法触发事件！", at_sender=True)
 
-    # 初始化最后事件日期
-    last_event_date = None
-    pet_last_event = pet.get("last_event_date")
-    if pet_last_event:
-        try:
-            if isinstance(pet_last_event, (int, float)):
-                last_event_date = datetime.fromtimestamp(pet_last_event).date()
-            elif isinstance(pet_last_event, str):
-                last_event_date = datetime.strptime(pet_last_event, "%Y-%m-%d").date()
-        except (TypeError, ValueError):
-            last_event_date = None
+    last_event_date = _pet_event_date(pet.get("last_event_date"))
 
     # 检查是否已经执行过今日事件（超级用户绕过）
     if last_event_date and last_event_date == now_date and not is_su(uid):
@@ -747,51 +832,11 @@ async def handle_pet_event(event: Event, bot: Bot, uid: int = Depends(get_uid)):
         await pet_event_cmd.finish(f"{pet['name']}还没有学会任何技能！", at_sender=True)
 
     results = []
-    # 在这里集中处理技能效果
     for skill_name in pet["skills"]:
         try:
-            if skill_name == "宝石爱好者":
-                amount = random.randint(1, 20)
-                money.kirastone += amount
-                results.append(f"\n{pet['name']}外出玩耍时偶遇无人看守的宝石矿井，偷偷捡回了{amount}枚宝石。")
-            elif skill_name == "盼望长大":
-                growth_gain = 10
-                pet['growth'] = min(pet.get('growth_required', math.inf), pet['growth'] + growth_gain)
-                results.append(f"\n{pet['name']}很喜欢你，决定要努力长大来报答你，成长值+{growth_gain}。")
-            elif skill_name == "金币爱好者":
-                amount = random.randint(1000, 20000)
-                money.gold += amount
-                results.append(f"\n{pet['name']}外出玩耍时捡到了一个钱包，里面有{amount}金币。")
-            elif skill_name == "幸运星":
-                amount = random.randint(5, 7)
-                money.luckygold += amount
-                results.append(f"\n{pet['name']}外出玩耍时偶遇音祈，由于可爱的外表，深受对方喜爱，获得了上帝的祝福。幸运币+{amount}。")
-            elif skill_name == "卖萌":
-                amount = random.randint(100, 2000)
-                money.starstone += amount
-                results.append(f"\n{pet['name']}外出玩耍时偶遇梦灵，由于太可爱了，被大小姐rua了个爽，并收获了大量好感度（星星+{amount}）。")
-            elif skill_name == "美食家":
-                food_item = random.choice(["普通料理", "高级料理", "豪华料理", "能量饮料"])
-                await add_user_item(uid, food_item, 1)
-                results.append(f"\n{pet['name']}外出玩耍时偶遇商店的抽奖活动，赢得了{food_item}。")
-            elif skill_name == "自我管理":
-                enum = random.randint(10, 80)
-                hnum = random.randint(10, 80)
-                pet["energy"] = min(pet["max_energy"], pet["energy"] + enum)
-                pet["happiness"] = min(pet["max_happiness"], pet["happiness"] + hnum)
-                results.append(f"\n{pet['name']}已经习惯了你早出晚归的生活，她知道你赚金币养她很不容易。通过自我情绪管理，她恢复{enum}精力和{hnum}好感。")
-            elif skill_name == "捕鱼达人":
-                is_cat = "猫" in pet["type"]
-                buff = 2 if is_cat else 1
-                stage = pet["stage"]
-                add_count = random.randint(1, 5) * 100 * (3 ** stage) * buff
-                DatabaseManager.check_and_update_fish_limit(uid, add_count * -1)
-                results.append(f"\n{pet['name']}在捕鱼大赛中名列前茅，赢得了鱼塘的特邀入场券。今日钓鱼次数+{add_count}。")
-            else:
-                results.append(f"【{skill_name}】是未知技能，无法发动。")
-
-        except Exception as e:
-            results.append(f"【{skill_name}】发动时发生错误：{str(e)}")
+            results.append(await _apply_pet_skill(skill_name, pet, uid))
+        except Exception as exc:
+            results.append(f"【{skill_name}】发动时发生错误：{exc}")
 
     # 在所有技能执行完毕后，保存宠物状态和本次事件的日期
     pet["last_event_date"] = now_date.strftime("%Y-%m-%d")
@@ -810,57 +855,72 @@ async def handle_pet_event(event: Event, bot: Bot, uid: int = Depends(get_uid)):
 # ===== 宠物进化 =====
 evolve_cmd = on_command("宠物进化", priority=5, block=True)
 
+
+def _evolution_requirement(pet: dict) -> Optional[tuple[str, int, float]]:
+    stage = pet["stage"]
+    if stage == 0:
+        return "奶油蛋糕", 1, GROWTH_STAGE_2
+    if stage == 1:
+        return "豪华蛋糕", 2, math.inf
+    return None
+
+
+def _next_evolution_type(pet: dict) -> Optional[str]:
+    evolution = EVOLUTIONS.get(pet["type"])
+    if isinstance(evolution, dict) and evolution:
+        return random.choice(list(evolution.values()))
+    if isinstance(evolution, str):
+        return evolution
+    return None
+
+
 @evolve_cmd.handle()
 async def handle_evolve(event: Event, bot: Bot, uid: int = Depends(get_uid)):
     pet = await get_user_pet(uid)
     if not pet or pet.get("temp_data"):
-        await evolve_cmd.finish("你还没有宠物！", at_sender=True)
-    
-    pet = await update_pet_status(pet)
-    
-    if pet["stage"] == 0 and pet["growth"] >= pet.get("growth_required", 100):
-        if not await use_user_item(uid, "奶油蛋糕"):
-            await evolve_cmd.finish("进化需要奶油蛋糕！", at_sender=True)
-        
-        if random.random() < 0.4:
-            await evolve_cmd.finish(f"很可惜，{pet['name']}进化失败了...", at_sender=True)
-        
-        evolution_options = EVOLUTIONS.get(pet["type"], {})
-        if isinstance(evolution_options, dict):
-            evolution_choice = random.choice(list(evolution_options.keys()))
-            new_type = evolution_options[evolution_choice]
-            pet["type"] = new_type
-            pet["stage"] = 1
-            pet["growth"] = 0
-            pet["growth_required"] = GROWTH_STAGE_2
-            await update_user_pet(uid, pet)
-            await evolve_cmd.finish(f"🎉 {pet['name']}成功进化为【{new_type}】！", at_sender=True)
-        else:
-            await evolve_cmd.finish("进化路线有误！", at_sender=True)
-            
-    elif pet["stage"] == 1 and pet["growth"] >= pet.get("growth_required", 200):
-        if not await use_user_item(uid, "豪华蛋糕"):
-            await evolve_cmd.finish("进化需要豪华蛋糕！", at_sender=True)
-        
-        if random.random() < 0.4:
-            await evolve_cmd.finish(f"很可惜，{pet['name']}进化失败了...", at_sender=True)
-        
-        new_type = EVOLUTIONS.get(pet["type"])
-        if new_type and isinstance(new_type, str):
-            pet["type"] = new_type
-            pet["stage"] = 2
-            pet["growth"] = 0
-            pet["growth_required"] = math.inf
-            await update_user_pet(uid, pet)
-            await evolve_cmd.finish(f"🎉 {pet['name']}成功进化为【{new_type}】！", at_sender=True)
-        else:
-            await evolve_cmd.finish("进化路线有误！", at_sender=True)
-    else:
+        await evolve_cmd.finish(NO_PET_MESSAGE, at_sender=True)
+
+    pet = update_pet_status(pet)
+
+    requirement = _evolution_requirement(pet)
+    growth_required = pet.get(
+        "growth_required",
+        100 if pet["stage"] == 0 else 200,
+    )
+    if requirement is None or pet["growth"] < growth_required:
         await evolve_cmd.finish(
             f"{pet['name']}还不满足进化条件（成长值需达到上限）", at_sender=True)
 
+    item_name, next_stage, next_growth_required = requirement
+    if not await use_user_item(uid, item_name):
+        await evolve_cmd.finish(f"进化需要{item_name}！", at_sender=True)
+    if random.random() < 0.4:
+        await evolve_cmd.finish(f"很可惜，{pet['name']}进化失败了...", at_sender=True)
+
+    new_type = _next_evolution_type(pet)
+    if new_type is None:
+        await evolve_cmd.finish("进化路线有误！", at_sender=True)
+
+    pet["type"] = new_type
+    pet["stage"] = next_stage
+    pet["growth"] = 0
+    pet["growth_required"] = next_growth_required
+    await update_user_pet(uid, pet)
+    await evolve_cmd.finish(
+        f"🎉 {pet['name']}成功进化为【{new_type}】！",
+        at_sender=True,
+    )
+
 # ===== 重置进化路线 =====
 reroll_evolution_cmd = on_command("重置进化路线", aliases={"重新进化"}, priority=5, block=True)
+
+
+def _base_pet_type_for_evolution(evolved_type: str) -> Optional[str]:
+    for base_type, evolutions in EVOLUTIONS.items():
+        if isinstance(evolutions, dict) and evolved_type in evolutions.values():
+            return base_type
+    return None
+
 
 @reroll_evolution_cmd.handle()
 async def handle_reroll_evolution(event: Event, bot: Bot, uid: int = Depends(get_uid)):
@@ -870,9 +930,9 @@ async def handle_reroll_evolution(event: Event, bot: Bot, uid: int = Depends(get
     pet = await get_user_pet(uid)
     if not pet or pet.get("temp_data"):
         await add_user_item(uid, "时之泪")
-        await reroll_evolution_cmd.finish("你还没有宠物！", at_sender=True)
+        await reroll_evolution_cmd.finish(NO_PET_MESSAGE, at_sender=True)
 
-    pet = await update_pet_status(pet)
+    pet = update_pet_status(pet)
     if pet.get("runaway"):
         await add_user_item(uid, "时之泪")
         await reroll_evolution_cmd.finish(f"你的宠物【{pet['name']}】离家出走了，无法重置进化！", at_sender=True)
@@ -886,23 +946,17 @@ async def handle_reroll_evolution(event: Event, bot: Bot, uid: int = Depends(get
     if random.random() < 0.5:
         await reroll_evolution_cmd.finish(f"{pet['name']}的进化分支没有改变。", at_sender=True)
 
-    base_type = None
-    for base, evolutions in EVOLUTIONS.items():
-        if isinstance(evolutions, dict):
-            for evo_name, evo_type in evolutions.items():
-                if evo_type == original_type:
-                    base_type = base
-                    break
-        if base_type:
-            break
-
+    base_type = _base_pet_type_for_evolution(original_type)
     if not base_type:
         await add_user_item(uid, "时之泪")
         await reroll_evolution_cmd.finish("无法找到原始进化路线。", at_sender=True)
 
     evolution_options = EVOLUTIONS[base_type]
-    available_choices = [k for k in evolution_options.keys() 
-                        if evolution_options[k] != original_type]
+    available_choices = [
+        choice
+        for choice, evolved_type in evolution_options.items()
+        if evolved_type != original_type
+    ]
 
     if not available_choices:
         await add_user_item(uid, "时之泪")
@@ -935,7 +989,7 @@ async def handle_rename(
     
     pet = await get_user_pet(uid)
     if not pet or pet.get("temp_data"):
-        await rename_cmd.finish("你还没有宠物！", at_sender=True)
+        await rename_cmd.finish(NO_PET_MESSAGE, at_sender=True)
     
     old_name = pet["name"]
     pet["name"] = new_name
@@ -948,17 +1002,17 @@ retrieve_cmd = on_command("寻回宠物", priority=5, block=True)
 
 @retrieve_cmd.handle()
 async def handle_retrieve(event: Event, bot: Bot, uid: int = Depends(get_uid)):
-    if not await use_user_item(uid, "最初的契约"):
-        await retrieve_cmd.finish("你没有最初的契约！", at_sender=True)
+    if not await use_user_item(uid, ORIGINAL_CONTRACT_ITEM):
+        await retrieve_cmd.finish(f"你没有{ORIGINAL_CONTRACT_ITEM}！", at_sender=True)
     
     pet = await get_user_pet(uid)
     if not pet or pet.get("temp_data"):
-        await add_user_item(uid, "最初的契约")
-        await retrieve_cmd.finish("你还没有宠物！", at_sender=True)
+        await add_user_item(uid, ORIGINAL_CONTRACT_ITEM)
+        await retrieve_cmd.finish(NO_PET_MESSAGE, at_sender=True)
     
-    pet = await update_pet_status(pet)
+    pet = update_pet_status(pet)
     if not pet.get("runaway"):
-        await add_user_item(uid, "最初的契约")
+        await add_user_item(uid, ORIGINAL_CONTRACT_ITEM)
         await retrieve_cmd.finish("你的宠物没有离家出走！", at_sender=True)
     
     pet["runaway"] = False
@@ -982,13 +1036,13 @@ async def handle_release_pet(
 ):
     pet = await get_user_pet(uid)
     if not pet:
-        await release_pet_cmd.finish("你还没有宠物！", at_sender=True)
+        await release_pet_cmd.finish(NO_PET_MESSAGE, at_sender=True)
     
     if pet.get("temp_data"):
         await release_pet_cmd.finish("你有一只待领养的宠物，请使用'放弃宠物'来放弃领养。", at_sender=True)
     
     # 更新宠物状态
-    pet = await update_pet_status(pet)
+    pet = update_pet_status(pet)
     await update_user_pet(uid, pet)
     
     # 确认操作
@@ -1010,9 +1064,9 @@ oath_cmd = on_command("永恒誓约", priority=5, block=True)
 async def handle_eternal_oath(event: Event, bot: Bot, uid: int = Depends(get_uid)):
     pet = await get_user_pet(uid)
     if not pet or pet.get("temp_data"):
-        await oath_cmd.finish("你还没有宠物！", at_sender=True)
+        await oath_cmd.finish(NO_PET_MESSAGE, at_sender=True)
     
-    pet = await update_pet_status(pet)
+    pet = update_pet_status(pet)
     
     status = min(pet["max_hunger"], pet["max_happiness"], pet["max_energy"])
     if status > 999999:
@@ -1024,7 +1078,10 @@ async def handle_eternal_oath(event: Event, bot: Bot, uid: int = Depends(get_uid
         await oath_cmd.finish(msg, at_sender=True)
     
     if pet.get("runaway"):
-        await oath_cmd.finish(f"{pet['name']}已经离家出走了！使用'最初的契约'可以寻回她。", at_sender=True)
+        await oath_cmd.finish(
+            f"{pet['name']}已经离家出走了！使用'{ORIGINAL_CONTRACT_ITEM}'可以寻回她。",
+            at_sender=True,
+        )
     
     if not await use_user_item(uid, "誓约戒指"):
         msg = f'\n{pet["name"]}有些失落地看着你...\n"那种事情...没有戒指怎么行..."'
@@ -1049,6 +1106,72 @@ async def handle_eternal_oath(event: Event, bot: Bot, uid: int = Depends(get_uid
 # ===== 宠物排行榜 =====
 pet_ranking_cmd = on_command("宠物排行榜", priority=5, block=True)
 
+
+def _normalized_uid(uid_key):
+    try:
+        return int(uid_key)
+    except (TypeError, ValueError):
+        return uid_key
+
+
+def _rankable_pet_entries(
+    user_pets: dict,
+    excluded_suids: set,
+    feisheng_status: dict,
+) -> list[dict]:
+    entries = []
+    for uid_key, pet in user_pets.items():
+        normalized_uid = _normalized_uid(uid_key)
+        if normalized_uid in excluded_suids or pet.get("stage") != 2:
+            continue
+
+        current_pet = update_pet_status(dict(pet))
+        if current_pet.get("runaway", False):
+            continue
+
+        ascension = feisheng_status.get(
+            normalized_uid,
+            {"is_pet_ascended": False, "is_ascended": False},
+        )
+        is_top = ascension["is_pet_ascended"]
+        entries.append(
+            {
+                "growth": current_pet["growth"],
+                "name": current_pet.get("name", "未知宠物"),
+                "type": current_pet.get("type", "未知类型"),
+                "uid": uid_key,
+                "is_top": is_top,
+                "hide_growth": is_top and ascension["is_ascended"],
+            }
+        )
+    entries.sort(
+        key=lambda item: (
+            item["is_top"],
+            item["hide_growth"],
+            item["growth"],
+        ),
+        reverse=True,
+    )
+    return entries
+
+
+def _pet_rankings(entries: list[dict]) -> dict:
+    rankings = {}
+    current_rank = 1
+    previous_key = None
+    for index, entry in enumerate(entries):
+        key = (
+            entry["is_top"],
+            entry["hide_growth"],
+            entry["growth"],
+        )
+        if key != previous_key:
+            current_rank = index + 1
+        rankings[entry["uid"]] = current_rank
+        previous_key = key
+    return rankings
+
+
 @pet_ranking_cmd.handle()
 async def handle_pet_ranking(event: Event, bot: Bot):
     """显示成长值最高的前10只成年体宠物"""
@@ -1059,52 +1182,31 @@ async def handle_pet_ranking(event: Event, bot: Bot):
     
     user_pets = await get_user_pets()
 
-    adult_pets = []
-    for uid_key, pet in user_pets.items():
-        # 过滤需要排除的 SU 用户（保留 level 1 的 SU）
-        try:
-            if int(uid_key) in excluded_suids:
-                continue
-        except (ValueError, TypeError):
-            if uid_key in excluded_suids:
-                continue
-        if pet.get("stage") != 2:
-            continue
-        temp_pet = dict(pet)
-        temp_pet = await update_pet_status(temp_pet)
-        if not temp_pet.get("runaway", False):
-            # 获取飞升状态
-            uid_int = int(uid_key) if isinstance(uid_key, (str, int)) else uid_key
-            fs = feisheng_status.get(uid_int, {"is_pet_ascended": False, "is_ascended": False})
-            is_pet_ascended = fs["is_pet_ascended"]
-            is_user_ascended = fs["is_ascended"]
-            # 宠物飞升 → 一律置顶
-            is_top = is_pet_ascended
-            # 用户也飞升 → 屏蔽成长值
-            hide_growth = is_pet_ascended and is_user_ascended
-            adult_pets.append((
-                temp_pet["growth"],
-                temp_pet["name"],
-                temp_pet["type"],
-                uid_key,
-                is_top,
-                hide_growth
-            ))
+    adult_pets = _rankable_pet_entries(
+        user_pets,
+        excluded_suids,
+        feisheng_status,
+    )
 
     if not adult_pets:
         await pet_ranking_cmd.finish("目前还没有成年体宠物上榜哦！", at_sender=True)
 
-    # 排序：宠物飞升的置顶；宠物飞升中，用户已飞升的排在用户未飞升的上方；同组内按成长值降序
-    adult_pets.sort(key=lambda x: (x[4], x[5], x[0]), reverse=True)
-    
     msg = ["🏆 宠物排行榜-TOP10 🏆"]
-    for rank, (growth, name, pet_type, _uid, is_top, hide_growth) in enumerate(adult_pets[:10], 1):
-        owner_name = get_user_nickname(int(_uid)) or f"UID{_uid}"
-        top_tag = "（飞升上界）" if is_top else ""
-        if hide_growth:
-            msg.append(f"{rank}. {name}({pet_type}) - 主人:{owner_name}\n成长值: 无法探查{top_tag}")
-        else:
-            msg.append(f"{rank}. {name}({pet_type}) - 主人:{owner_name}\n成长值: {growth:.1f}{top_tag}")
+    for rank, entry in enumerate(adult_pets[:10], 1):
+        owner_name = (
+            get_user_nickname(int(entry["uid"]))
+            or f"UID{entry['uid']}"
+        )
+        top_tag = "（飞升上界）" if entry["is_top"] else ""
+        growth = (
+            "无法探查"
+            if entry["hide_growth"]
+            else f"{entry['growth']:.1f}"
+        )
+        msg.append(
+            f"{rank}. {entry['name']}({entry['type']}) - 主人:{owner_name}"
+            f"\n成长值: {growth}{top_tag}"
+        )
 
     msg_str = "\n".join(msg)
     chain = await build_forward_chain(bot, [msg_str])
@@ -1119,9 +1221,9 @@ async def handle_my_pet_ranking(event: Event, bot: Bot, uid: int = Depends(get_u
     """查看自己宠物的排名"""
     pet = await get_user_pet(uid)
     if not pet or pet.get("temp_data"):
-        await pet_my_ranking_cmd.finish("你还没有宠物！", at_sender=True)
+        await pet_my_ranking_cmd.finish(NO_PET_MESSAGE, at_sender=True)
 
-    pet = await update_pet_status(pet)
+    pet = update_pet_status(pet)
     await update_user_pet(uid, pet)
 
     if pet.get("runaway", False):
@@ -1137,69 +1239,40 @@ async def handle_my_pet_ranking(event: Event, bot: Bot, uid: int = Depends(get_u
     excluded_suids = get_excluded_su_uids()
     feisheng_status = await get_all_pet_feisheng_status()
     
-    valid_pets = []
-    for uid_key, p in user_pets.items():
-        # 过滤需要排除的 SU 用户（保留 level 1 的 SU）
-        try:
-            if int(uid_key) in excluded_suids:
-                continue
-        except (ValueError, TypeError):
-            if uid_key in excluded_suids:
-                continue
-        if p.get("stage") != 2:
-            continue
-        temp_pet = dict(p)
-        temp_pet = await update_pet_status(temp_pet)
-        if not temp_pet.get("runaway", False):
-            # 获取飞升状态
-            uid_int = int(uid_key) if isinstance(uid_key, (str, int)) else uid_key
-            fs = feisheng_status.get(uid_int, {"is_pet_ascended": False, "is_ascended": False})
-            is_pet_ascended = fs["is_pet_ascended"]
-            is_user_ascended = fs["is_ascended"]
-            # 宠物飞升 → 一律置顶
-            is_top = is_pet_ascended
-            # 用户也飞升 → 屏蔽成长值
-            hide_growth = is_pet_ascended and is_user_ascended
-            valid_pets.append((
-                temp_pet["growth"],
-                uid_key,
-                temp_pet.get("name", "未知宠物"),
-                is_top,
-                hide_growth
-            ))
+    valid_pets = _rankable_pet_entries(
+        user_pets,
+        excluded_suids,
+        feisheng_status,
+    )
 
     if not valid_pets:
         await pet_my_ranking_cmd.finish("目前还没有有效的成年体宠物上榜哦！", at_sender=True)
 
-    # 排序：宠物飞升的置顶；宠物飞升中，用户已飞升的排在用户未飞升的上方；同组内按成长值降序
-    valid_pets.sort(key=lambda x: (x[3], x[4], x[0]), reverse=True)
-
-    # 计算排名（处理并列情况）
-    rankings = {}
-    current_rank = 1
-    prev_key = None
-    for idx, (growth, uid_key, name, is_top, hide_growth) in enumerate(valid_pets):
-        # 飞升宠物和非飞升宠物分组排名
-        key = (is_top, hide_growth, growth)
-        if key != prev_key:
-            current_rank = idx + 1
-        rankings[uid_key] = (current_rank, growth, is_top, hide_growth)
-        prev_key = key
-
-    my_rank_info = rankings.get(uid) or rankings.get(str(uid))
-    if my_rank_info is None:
+    rankings = _pet_rankings(valid_pets)
+    my_entry = next(
+        (
+            entry
+            for entry in valid_pets
+            if entry["uid"] in {uid, str(uid)}
+        ),
+        None,
+    )
+    if my_entry is None:
         await pet_my_ranking_cmd.finish("你的宠物未上榜！", at_sender=True)
-    else:
-        my_rank, my_growth, is_top, hide_growth = my_rank_info
-        total_pets = len(valid_pets)
-        top_tag = " ✨" if is_top else ""
-        growth_str = "无法探查" if hide_growth else f"{my_growth:.1f}"
-        await pet_my_ranking_cmd.finish(
-            f"你的宠物【{pet['name']}】"
-            f"\n当前排名: 第{my_rank}名（共{total_pets}只成年宠物）"
-            f"\n成长值: {growth_str}{top_tag}",
-            at_sender=True
-        )
+
+    my_rank = rankings[my_entry["uid"]]
+    top_tag = " ✨" if my_entry["is_top"] else ""
+    growth_str = (
+        "无法探查"
+        if my_entry["hide_growth"]
+        else f"{my_entry['growth']:.1f}"
+    )
+    await pet_my_ranking_cmd.finish(
+        f"你的宠物【{pet['name']}】"
+        f"\n当前排名: 第{my_rank}名（共{len(valid_pets)}只成年宠物）"
+        f"\n成长值: {growth_str}{top_tag}",
+        at_sender=True,
+    )
 
 
 # ===== 技能帮助 =====

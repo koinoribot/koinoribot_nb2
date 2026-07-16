@@ -23,6 +23,8 @@ from .uid_manager import get_uid_by_external_id
 from .uid_manager import get_external_ids
 from .nickname import get_user_nickname
 
+BASE64_PREFIX = "base64://"
+
 # ===== UID 相关 =====
 
 def _get_platform_uid(event: Event) -> str:
@@ -46,7 +48,7 @@ def resolve_uid(event: Event, platform_uid: str) -> int:
     return uuid
 
 
-async def get_uid(event: Event, platform_uid: str = Depends(_get_platform_uid)) -> int:
+def get_uid(event: Event, platform_uid: str = Depends(_get_platform_uid)) -> int:
     """获取统一 UID（依赖注入版本）"""
     return resolve_uid(event, platform_uid)
 
@@ -142,23 +144,26 @@ async def get_sender_nickname(event: Event) -> str:
     return ""
 
 
+def _qqbot_avatar_url(event: Event, uid: Optional[int]) -> str:
+    openid = event.get_user_id()
+    if _qqbot_appid and openid:
+        return f'https://thirdqq.qlogo.cn/qqapp/{_qqbot_appid}/{openid}/100'
+    if uid is not None:
+        external_ids = get_external_ids(uid)
+        onebot_id = external_ids.get("onebot_id")
+        if onebot_id:
+            return f'https://q1.qlogo.cn/g?b=qq&nk={onebot_id}&s=640'
+    author = getattr(event, "author", None)
+    return getattr(author, "avatar", "") if author else ""
+
+
 def get_user_avatar_url(event: Event, uid: Optional[int] = None) -> str:
     """获取用户头像 URL"""
     if isinstance(event, onebot.Event):
         user_id = event.get_user_id()
         return f'https://q1.qlogo.cn/g?b=qq&nk={user_id}&s=640'
     if isinstance(event, qq.Event):
-        openid = event.get_user_id()
-        if _qqbot_appid and openid:
-            return f'https://thirdqq.qlogo.cn/qqapp/{_qqbot_appid}/{openid}/100'
-        if uid is not None:
-            external_ids = get_external_ids(uid)
-            if external_ids.get("onebot_id"):
-                return f'https://q1.qlogo.cn/g?b=qq&nk={external_ids["onebot_id"]}&s=640'
-        if hasattr(event, 'author') and event.author:
-            avatar = getattr(event.author, 'avatar', None)
-            if avatar:
-                return avatar
+        return _qqbot_avatar_url(event, uid)
     return ''
 
 
@@ -173,6 +178,84 @@ def is_qqbot(event: Event) -> bool:
 
 
 # ===== 消息发送相关 =====
+
+
+def _normalize_forward_nodes(messages) -> list:
+    node_list = (
+        list(messages)
+        if isinstance(messages, onebot.Message)
+        else messages
+    )
+    compatible_nodes = []
+    for node in node_list:
+        if isinstance(node, onebot.MessageSegment) and node.type == "node":
+            compatible_nodes.append({
+                "data": {
+                    "name": node.data.get("nickname", "用户"),
+                    "content": node.data.get("content", ""),
+                }
+            })
+        elif isinstance(node, dict):
+            compatible_nodes.append(node)
+    return compatible_nodes
+
+
+def _segment_type_and_data(segment):
+    if isinstance(segment, onebot.MessageSegment):
+        return segment.type, segment.data
+    if isinstance(segment, dict):
+        return segment.get('type'), segment.get('data', {})
+    return None, {}
+
+
+def _qq_image_segment(segment_data):
+    file_uri = segment_data.get('file', '')
+    if file_uri.startswith(BASE64_PREFIX):
+        try:
+            image_bytes = base64.b64decode(
+                file_uri.removeprefix(BASE64_PREFIX)
+            )
+            return qq.MessageSegment.file_image(image_bytes)
+        except (ValueError, TypeError) as error:
+            logger.error(f"解析合并转发图片失败: {error}")
+            return qq.MessageSegment.text("[图片解析失败]")
+    if file_uri.startswith('http'):
+        return qq.MessageSegment.image(file_uri)
+    url = segment_data.get('url')
+    if url:
+        return qq.MessageSegment.image(url)
+    return qq.MessageSegment.text("[不支持的图片格式]")
+
+
+def _qq_message_from_content(content):
+    if isinstance(content, str):
+        return qq.Message([qq.MessageSegment.text(content)])
+    if not isinstance(content, (onebot.Message, list)):
+        return qq.Message()
+
+    message = qq.Message()
+    for segment in content:
+        segment_type, segment_data = _segment_type_and_data(segment)
+        if segment_type == 'text':
+            text = segment_data.get('text', '')
+            if text:
+                message.append(qq.MessageSegment.text(text))
+        elif segment_type == 'image':
+            message.append(_qq_image_segment(segment_data))
+    return message
+
+
+async def _send_forward_nodes_individually(
+    event: Event,
+    bot: Bot,
+    nodes: list,
+):
+    for node in nodes:
+        content = node.get('data', {}).get('content', '')
+        message = _qq_message_from_content(content)
+        if message:
+            await bot.send(event, message)
+
 
 async def send_group_forward_msg(
     event: Event, 
@@ -192,77 +275,17 @@ async def send_group_forward_msg(
     """
     if isinstance(event, onebot.GroupMessageEvent):
         await bot.send_group_forward_msg(group_id=event.group_id, messages=messages)
-    else:
-        # QQ-Bot 降级为普通消息
-        # 将 messages 统一转为可迭代的节点列表
-        node_list = list(messages) if isinstance(messages, onebot.Message) else messages
-        
-        # 提取节点中的 content 用于图片转换
-        _compat_nodes = []
-        for node in node_list:
-            if isinstance(node, onebot.MessageSegment) and node.type == "node":
-                _compat_nodes.append({
-                    "data": {
-                        "name": node.data.get("nickname", "用户"),
-                        "content": node.data.get("content", ""),
-                    }
-                })
-            elif isinstance(node, dict):
-                _compat_nodes.append(node)
-        
-        # 尝试转换为图片发送
-        try:
-            img_bytes = await _nodes_to_image(_compat_nodes)
-            if img_bytes:
-                await bot.send(event, qq.MessageSegment.file_image(img_bytes))
-                return
-        except Exception as e:
-            logger.error(f"合并转发转图片失败: {e}")
+        return
 
-        # 图片生成失败，回退到逐条发送
-        for node in _compat_nodes:
-            content = node.get('data', {}).get('content', '')
-            
-            msg_to_send = qq.Message()
-            if isinstance(content, (onebot.Message, list)):
-                for segment in content:
-                    if isinstance(segment, onebot.MessageSegment):
-                        seg_type = segment.type
-                        seg_data = segment.data
-                    elif isinstance(segment, dict):
-                        seg_type = segment.get('type')
-                        seg_data = segment.get('data', {})
-                    else:
-                        continue
-                    
-                    if seg_type == 'text':
-                        text = seg_data.get('text', '')
-                        if text:
-                            msg_to_send.append(qq.MessageSegment.text(text))
-                    elif seg_type == 'image':
-                        file_uri = seg_data.get('file', '')
-                        if file_uri.startswith('base64://'):
-                            try:
-                                b64_data = file_uri.replace('base64://', '')
-                                img_bytes = base64.b64decode(b64_data)
-                                msg_to_send.append(qq.MessageSegment.file_image(img_bytes))
-                            except Exception as e:
-                                logger.error(f"解析合并转发图片失败: {e}")
-                                msg_to_send.append(qq.MessageSegment.text("[图片解析失败]"))
-                        elif file_uri.startswith('http'):
-                            msg_to_send.append(qq.MessageSegment.image(file_uri))
-                        else:
-                            url = seg_data.get('url')
-                            if url:
-                                msg_to_send.append(qq.MessageSegment.image(url))
-                            else:
-                                msg_to_send.append(qq.MessageSegment.text("[不支持的图片格式]"))
-                                    
-            elif isinstance(content, str):
-                msg_to_send.append(qq.MessageSegment.text(content))
-            
-            if msg_to_send:
-                await bot.send(event, msg_to_send)
+    compatible_nodes = _normalize_forward_nodes(messages)
+    try:
+        image_bytes = await _nodes_to_image(compatible_nodes)
+        if image_bytes:
+            await bot.send(event, qq.MessageSegment.file_image(image_bytes))
+            return
+    except Exception as error:
+        logger.error(f"合并转发转图片失败: {error}")
+    await _send_forward_nodes_individually(event, bot, compatible_nodes)
 
 
 async def build_forward_node(
@@ -401,126 +424,173 @@ def get_at_uid(message_segment:onebot.MessageSegment | qq.MessageSegment) -> Opt
 
 # ===== 图片生成辅助 =====
 
+
+def _measure_text_width(image: BuildImage, text: str) -> float:
+    try:
+        return image.font.getlength(text)
+    except AttributeError:
+        return image.font.getsize(text)[0]
+
+
+def _draw_wrapped_text(
+    image: BuildImage,
+    text: str,
+    current_y: int,
+    width: int,
+    padding: int,
+    font_size: int,
+    line_spacing: int,
+) -> int:
+    max_width = width - 2 * padding
+    for original_line in text.split('\n'):
+        if not original_line:
+            current_y += font_size + line_spacing
+            continue
+
+        current_line = ""
+        for character in original_line:
+            test_line = current_line + character
+            if (
+                _measure_text_width(image, test_line) > max_width
+                and current_line
+            ):
+                image.text(
+                    (padding, current_y),
+                    current_line,
+                    fill=(0, 0, 0),
+                )
+                current_y += font_size + line_spacing
+                current_line = character
+            else:
+                current_line = test_line
+
+        if current_line:
+            image.text(
+                (padding, current_y),
+                current_line,
+                fill=(0, 0, 0),
+            )
+            current_y += font_size + line_spacing
+    return current_y
+
+
+async def _node_image_data(segment_data: dict) -> bytes | None:
+    file_uri = segment_data.get('file', '')
+    url = segment_data.get('url', '')
+    if file_uri.startswith(BASE64_PREFIX):
+        try:
+            return base64.b64decode(
+                file_uri.removeprefix(BASE64_PREFIX)
+            )
+        except (ValueError, TypeError):
+            return None
+    if file_uri.startswith('http'):
+        url = file_uri
+    if not url:
+        return None
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(url, timeout=10)
+        except httpx.HTTPError:
+            return None
+    return response.content if response.status_code == 200 else None
+
+
+def _paste_node_image(
+    image: BuildImage,
+    image_data: bytes | None,
+    current_y: int,
+    width: int,
+    padding: int,
+    font_size: int,
+    line_spacing: int,
+) -> int:
+    if not image_data:
+        image.text((padding, current_y), "[图片]", fill=(100, 100, 100))
+        return current_y + font_size + line_spacing
+
+    try:
+        from PIL import Image
+        picture = Image.open(io.BytesIO(image_data))
+        picture_width, picture_height = picture.size
+        max_width = width - 2 * padding
+        if picture_width > max_width:
+            ratio = max_width / picture_width
+            picture_height = int(picture_height * ratio)
+            picture = picture.resize((max_width, picture_height))
+        image.paste(picture, (padding, current_y))
+        return current_y + picture_height + line_spacing
+    except (OSError, TypeError, ValueError):
+        image.text(
+            (padding, current_y),
+            "[图片加载失败]",
+            fill=(255, 0, 0),
+        )
+        return current_y + font_size + line_spacing
+
+
+async def _draw_node_segment(
+    image: BuildImage,
+    segment,
+    current_y: int,
+    width: int,
+    padding: int,
+    font_size: int,
+    line_spacing: int,
+) -> int:
+    segment_type, segment_data = _segment_type_and_data(segment)
+    if segment_type == 'text':
+        text = segment_data.get('text', '')
+        if text:
+            return _draw_wrapped_text(
+                image,
+                text,
+                current_y,
+                width,
+                padding,
+                font_size,
+                line_spacing,
+            )
+    elif segment_type == 'image':
+        return _paste_node_image(
+            image,
+            await _node_image_data(segment_data),
+            current_y,
+            width,
+            padding,
+            font_size,
+            line_spacing,
+        )
+    return current_y
+
+
 async def _create_node_image(node: Dict[str, Any], width: int = 600, font_size: int = 20) -> BuildImage:
     """创建单个消息节点的图片"""
     data = node.get('data', {})
-    name = data.get('name', '用户')
     content = data.get('content', [])
-    
-    # 估算高度
     padding = 10
-    name_height = 30
     line_spacing = 5
-    
-    # 初始高度，后续会裁剪
-    temp_height = 5000 
+    temp_height = 5000
     img = BuildImage(width, temp_height, font_size=font_size, color=(255, 255, 255))
-    
     current_y = padding
-    
-    # 绘制名字 (如果需要显示名字，取消注释并调整颜色)
-    # img.text((padding, current_y), f"{name}", fill=(100, 100, 100))
-    # current_y += name_height
-    
+
     if isinstance(content, str):
         content = [{'type': 'text', 'data': {'text': content}}]
-        
-    for segment in content:
-        # 兼容 MessageSegment 对象和 dict 格式
-        if isinstance(segment, onebot.MessageSegment):
-            seg_type = segment.type
-            seg_data = segment.data
-        elif isinstance(segment, dict):
-            seg_type = segment.get('type')
-            seg_data = segment.get('data', {})
-        else:
-            continue
-        
-        if seg_type == 'text':
-            text = seg_data.get('text', '')
-            if text:
-                max_width = width - 2 * padding
-                
-                # 先按换行符分割，再对每一行进行像素级精确换行
-                original_lines = text.split('\n')
-                for original_line in original_lines:
-                    if not original_line:
-                        current_y += font_size + line_spacing
-                        continue
-                    
-                    # 逐字符测量，按实际像素宽度换行
-                    current_line = ""
-                    for char in original_line:
-                        test_line = current_line + char
-                        try:
-                            line_w = img.font.getlength(test_line)
-                        except AttributeError:
-                            line_w = img.font.getsize(test_line)[0]
-                        if line_w > max_width and current_line:
-                            img.text((padding, current_y), current_line, fill=(0, 0, 0))
-                            current_y += font_size + line_spacing
-                            current_line = char
-                        else:
-                            current_line = test_line
-                    
-                    if current_line:
-                        img.text((padding, current_y), current_line, fill=(0, 0, 0))
-                        current_y += font_size + line_spacing
-                    
-        elif seg_type == 'image':
-            image_data = None
-            file_uri = seg_data.get('file', '')
-            url = seg_data.get('url', '')
-            
-            if file_uri.startswith('base64://'):
-                try:
-                    b64_data = file_uri.replace('base64://', '')
-                    image_data = base64.b64decode(b64_data)
-                except Exception:
-                    pass
-            elif file_uri.startswith('http'):
-                url = file_uri
-            elif not url and file_uri:
-                 # 尝试直接作为url
-                 if file_uri.startswith('http'):
-                     url = file_uri
 
-            if not image_data and url:
-                async with httpx.AsyncClient() as client:
-                    try:
-                        resp = await client.get(url, timeout=10)
-                        if resp.status_code == 200:
-                            image_data = resp.content
-                    except Exception:
-                        pass
-            
-            if image_data:
-                try:
-                    from PIL import Image
-                    pic = Image.open(io.BytesIO(image_data))
-                    # 调整图片大小以适应宽度
-                    pic_w, pic_h = pic.size
-                    max_w = width - 2 * padding
-                    if pic_w > max_w:
-                        ratio = max_w / pic_w
-                        new_h = int(pic_h * ratio)
-                        pic = pic.resize((max_w, new_h))
-                        pic_w, pic_h = max_w, new_h
-                        
-                    img.paste(pic, (padding, current_y))
-                    current_y += pic_h + line_spacing
-                except Exception:
-                    img.text((padding, current_y), "[图片加载失败]", fill=(255, 0, 0))
-                    current_y += font_size + line_spacing
-            else:
-                if seg_type == 'image':
-                     img.text((padding, current_y), "[图片]", fill=(100, 100, 100))
-                     current_y += font_size + line_spacing
-                     
-    # 裁剪多余部分
+    for segment in content:
+        current_y = await _draw_node_segment(
+            img,
+            segment,
+            current_y,
+            width,
+            padding,
+            font_size,
+            line_spacing,
+        )
+
     if current_y + padding < temp_height:
         img.crop((0, 0, width, current_y + padding))
-        
     return img
 
 async def _nodes_to_image(messages: List[Dict[str, Any]]) -> bytes:
@@ -544,11 +614,11 @@ async def _nodes_to_image(messages: List[Dict[str, Any]]) -> bytes:
     
     current_y = 0
     for img in images:
-        final_img.paste(img.markImg, (0, current_y))
+        final_img.paste(img.mark_img, (0, current_y))
         current_y += img.h
         
     output = io.BytesIO()
-    final_img.markImg.save(output, format='PNG')
+    final_img.mark_img.save(output, format='PNG')
     return output.getvalue()
 
 
@@ -576,4 +646,4 @@ def build_image_msg(event: Event, image_data: Union[bytes, str]):
         return QQMsgSeg.file_image(image_bytes)
     else:
         from nonebot.adapters.onebot.v11 import MessageSegment as OBMsgSeg
-        return OBMsgSeg.image(f"base64://{b64_str}")
+        return OBMsgSeg.image(f"{BASE64_PREFIX}{b64_str}")

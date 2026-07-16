@@ -102,6 +102,91 @@ def is_expired(session: Dict) -> bool:
     return time.time() > session.get('expire_time', 0)
 
 
+WORD_LEVELS = {'四级', '六级', '专八', '八级'}
+
+
+def _valid_word_length(value: str) -> int | None:
+    if value.isdigit() and 3 <= int(value) <= 9:
+        return int(value)
+    return None
+
+
+def _single_wordle_option(value: str) -> tuple[int, str]:
+    word_length = _valid_word_length(value)
+    if word_length is not None:
+        return word_length, '四级'
+    if value in WORD_LEVELS:
+        return 5, value
+    return 5, '四级'
+
+
+def _paired_wordle_options(first: str, second: str) -> tuple[int, str]:
+    first_length = _valid_word_length(first)
+    if first_length is not None:
+        level = second if second in WORD_LEVELS else '四级'
+        return first_length, level
+
+    second_length = _valid_word_length(second)
+    if second_length is not None:
+        level = first if first in WORD_LEVELS else '四级'
+        return second_length, level
+    return 5, '四级'
+
+
+def _parse_wordle_options(message: str) -> tuple[int, str]:
+    parts = message.split()
+    if len(parts) >= 3:
+        raise ValueError
+
+    if len(parts) == 1:
+        return _single_wordle_option(parts[0])
+    if len(parts) == 2:
+        return _paired_wordle_options(*parts)
+    return 5, '四级'
+
+
+async def _send_expired_result(
+    event: Event,
+    bot: Bot,
+    gid: str,
+    message: str,
+) -> None:
+    close_session(gid)
+    pic_path = temp_path / f'{gid}.png'
+    if pic_path.exists():
+        pic = BuildImage(0, 0, background=str(pic_path))
+        image_message = build_image_msg(event, pic.pic2bs4())
+        await bot.send(event, image_message + message)
+        return
+    await bot.send(event, message)
+
+
+async def _finish_guess_round(
+    event: Event,
+    bot: Bot,
+    gid: str,
+    session: Dict,
+    picture: BuildImage,
+    is_correct: bool,
+    success_message: str,
+    failure_message: str,
+) -> None:
+    image_message = build_image_msg(event, picture.pic2bs4())
+    if is_correct:
+        await bot.send(event, image_message + success_message, at_sender=True)
+        close_session(gid)
+        return
+
+    session['times'] += 1
+    if session['times'] == session['total_times']:
+        await bot.send(event, image_message + failure_message, at_sender=True)
+        close_session(gid)
+        return
+
+    picture.save(str(temp_path / f'{gid}.png'))
+    await bot.send(event, image_message)
+
+
 # ===== 猜英语单词 =====
 def draw_wordle_legend(bg: BuildImage) -> BuildImage:
     """绘制猜单词图例"""
@@ -136,25 +221,9 @@ async def handle_wordle(event: Event, bot: Bot, args: Message = CommandArg(), gi
     
     # 解析参数
     msg_text = args.extract_plain_text().strip()
-    msg_splt = msg_text.split()
-    level = '四级'
-    word_len = 5
-    
-    if len(msg_splt) == 1:
-        if msg_splt[0].isdigit() and 3 <= int(msg_splt[0]) <= 9:
-            word_len = int(msg_splt[0])
-        elif msg_splt[0] in ['四级', '六级', '专八', '八级']:
-            level = msg_splt[0]
-    elif len(msg_splt) == 2:
-        if msg_splt[0].isdigit() and 3 <= int(msg_splt[0]) <= 9:
-            word_len = int(msg_splt[0])
-            if msg_splt[1] in ['四级', '六级', '专八', '八级']:
-                level = msg_splt[1]
-        elif msg_splt[1].isdigit() and 3 <= int(msg_splt[1]) <= 9:
-            word_len = int(msg_splt[1])
-            if msg_splt[0] in ['四级', '六级', '专八', '八级']:
-                level = msg_splt[0]
-    elif len(msg_splt) >= 3:
+    try:
+        word_len, level = _parse_wordle_options(msg_text)
+    except ValueError:
         await wordle_cmd.finish("例如：wordle 四级 5", at_sender=True)
     
     # 获取随机单词
@@ -256,7 +325,10 @@ async def handle_digitle(event: Event, bot: Bot, args: Message = CommandArg(), g
     bg.save(str(temp_path / f'{gid}.png'))
     
     img_msg = build_image_msg(event, bg.pic2bs4())
-    await digitle_cmd.finish(img_msg + f"\n请发送【我猜是 对应数字】进行猜测~\n发送【我不猜了】可退出游戏", at_sender=True)
+    await digitle_cmd.finish(
+        img_msg + "\n请发送【我猜是 对应数字】进行猜测~\n发送【我不猜了】可退出游戏",
+        at_sender=True,
+    )
 
 
 # ===== 猜日语 =====
@@ -326,6 +398,7 @@ async def handle_quit(event: Event, bot: Bot, gid: str = Depends(get_group_id)):
         #await quit_cmd.finish("当前没有进行中的猜单词游戏喔~", at_sender=True)
         return
     
+    game_type = session.get('type')
     close_session(gid)
     if game_type == '英语单词':
         word = session['word']
@@ -337,7 +410,6 @@ async def handle_quit(event: Event, bot: Bot, gid: str = Depends(get_group_id)):
         await quit_cmd.finish(f'已退出~\n这个数字是{answer}', at_sender=True)
     elif game_type == '日语单词':
         kana = session['kana']
-        jpword = session['jpword']
         yomi = session['yomi']
         mean = session['mean']
         sample = f"\n{session.get('sample', '')}" if session.get('sample') else ''
@@ -395,11 +467,189 @@ async def handle_guess(event: Event, bot: Bot, args: Message = CommandArg(), gid
         await handle_japanese_guess(event, bot, gid, session, message)
 
 
+def _wordle_states(guess: str, target: str) -> list[str | None]:
+    remaining = target
+    states = []
+    for index, alphabet in enumerate(guess):
+        if alphabet == remaining[index]:
+            remaining_chars = list(remaining)
+            remaining_chars[index] = '*'
+            remaining = ''.join(remaining_chars)
+            states.append('correct')
+        elif alphabet in remaining:
+            remaining = remaining.replace(alphabet, '*', 1)
+            states.append('present')
+        else:
+            states.append(None)
+    return states
+
+
+def _draw_english_guess(
+    gid: str,
+    message: str,
+    target: str,
+    times: int,
+) -> tuple[BuildImage, bool]:
+    states = _wordle_states(message, target)
+    picture = BuildImage(0, 0, background=str(temp_path / f'{gid}.png'))
+    for index, alphabet_value in enumerate(message):
+        alphabet = BuildImage(
+            0,
+            0,
+            plain_text=cap_up[alphabet_value.upper()],
+            font=font_bold,
+            font_size=28,
+            font_color=font_color,
+            is_alpha=True,
+        )
+        if states[index] == 'correct':
+            picture.rectangle(
+                (
+                    15 + index * gap,
+                    15 + times * gap,
+                    54 + index * gap,
+                    54 + times * gap,
+                ),
+                fill=color_blue,
+            )
+        elif states[index] == 'present':
+            picture.rectangle(
+                (
+                    15 + index * gap,
+                    15 + times * gap,
+                    54 + index * gap,
+                    54 + times * gap,
+                ),
+                fill=color_light_gray,
+            )
+        picture.paste(
+            alphabet,
+            (
+                35 + index * gap - int(alphabet.w / 2),
+                32 + times * gap - int(alphabet.h / 2),
+            ),
+            alpha=True,
+        )
+    return picture, all(state == 'correct' for state in states)
+
+
+def _digit_states(message: str, answer: str) -> list[str | None]:
+    states = [None] * len(message)
+    remaining = list(answer)
+    for index, digit in enumerate(message):
+        if digit == remaining[index]:
+            states[index] = 'correct'
+            remaining[index] = None
+    for index, digit in enumerate(message):
+        if states[index] is None and digit in remaining:
+            states[index] = 'present'
+            remaining.remove(digit)
+    return states
+
+
+def _draw_digit_guess(
+    gid: str,
+    message: str,
+    answer: int,
+    times: int,
+) -> tuple[BuildImage, bool]:
+    states = _digit_states(message, str(answer))
+    picture = BuildImage(0, 0, background=str(temp_path / f'{gid}.png'))
+    numeric_guess = int(message)
+    digit_color = (
+        color_red
+        if numeric_guess > answer
+        else color_green if numeric_guess < answer else font_color
+    )
+    for index, digit_value in enumerate(message):
+        digit = BuildImage(
+            0,
+            0,
+            plain_text=digit_value,
+            font=font_bold,
+            font_size=30,
+            font_color=digit_color,
+            is_alpha=True,
+        )
+        if states[index] == 'correct':
+            picture.rectangle(
+                (
+                    15 + index * gap,
+                    15 + times * gap,
+                    54 + index * gap,
+                    54 + times * gap,
+                ),
+                fill=color_blue,
+            )
+        elif states[index] == 'present':
+            picture.rectangle(
+                (
+                    15 + index * gap,
+                    15 + times * gap,
+                    54 + index * gap,
+                    54 + times * gap,
+                ),
+                fill=color_orange,
+            )
+        picture.paste(
+            digit,
+            (
+                34 + index * gap - int(digit.w / 2),
+                32 + times * gap - int(digit.h / 2),
+            ),
+            alpha=True,
+        )
+    return picture, all(state == 'correct' for state in states)
+
+
+def _draw_japanese_guess(
+    gid: str,
+    message: str,
+    kana: str,
+    times: int,
+) -> tuple[BuildImage, bool]:
+    picture = BuildImage(0, 0, background=str(temp_path / f'{gid}.png'))
+    for index, kana_value in enumerate(message):
+        hiragana = BuildImage(
+            0,
+            0,
+            plain_text=kana_value,
+            font=font_bold,
+            font_size=28,
+            font_color=font_color,
+            is_alpha=True,
+        )
+        if kana_value == kana[index]:
+            fill = color_blue
+        elif kana_value in kana:
+            fill = color_light_gray
+        else:
+            fill = None
+        if fill:
+            picture.rectangle(
+                (
+                    15 + index * gap,
+                    15 + times * gap,
+                    54 + index * gap,
+                    54 + times * gap,
+                ),
+                fill=fill,
+            )
+        picture.paste(
+            hiragana,
+            (
+                35 + index * gap - int(hiragana.w / 2),
+                33 + times * gap - int(hiragana.h / 2),
+            ),
+            alpha=True,
+        )
+    return picture, message == kana
+
+
 async def handle_english_guess(event: Event, bot: Bot, gid: str, session: Dict, message: str):
     """处理英语单词猜测"""
     # 检查输入是否为纯字母
-    rematch = re.findall('^[a-zA-z]+$', message)
-    if not rematch:
+    if re.fullmatch(r'[A-Za-z]+', message) is None:
         return
     
     word = session['word']
@@ -411,14 +661,12 @@ async def handle_english_guess(event: Event, bot: Bot, gid: str, session: Dict, 
     
     # 检查是否过期
     if is_expired(session):
-        close_session(gid)
-        pic_path = temp_path / f'{gid}.png'
-        if pic_path.exists():
-            pic = BuildImage(0, 0, background=str(pic_path))
-            img_msg = build_image_msg(event, pic.pic2bs4())
-            await bot.send(event, img_msg + f"时间已过，正确答案是{word}，{pos}{trans}")
-        else:
-            await bot.send(event, f"时间已过，正确答案是{word}，{pos}{trans}")
+        await _send_expired_result(
+            event,
+            bot,
+            gid,
+            f"时间已过，正确答案是{word}，{pos}{trans}",
+        )
         return
     
     message = message.lower()
@@ -430,67 +678,41 @@ async def handle_english_guess(event: Event, bot: Bot, gid: str, session: Dict, 
     
     # 特殊命令处理
     if length >= len(check_list) or message not in check_list[length]:
-        await bot.send(event, f'这个单词不对喔', at_sender=True)
+        await bot.send(event, '这个单词不对喔', at_sender=True)
         return
-    
-    # 比较结果
-    correct_pos = []
-    is_in_word = []
-    word_low_copy = word_low
-    
-    pic = BuildImage(0, 0, background=str(temp_path / f'{gid}.png'))
-    
-    for i in range(length):
-        alphabet = BuildImage(0, 0, plain_text=cap_up[message[i].upper()], font=font_bold, font_size=28, font_color=font_color, is_alpha=True)
-        if message[i] == word_low_copy[i]:
-            # 位置正确
-            word_but_list = list(word_low_copy)
-            word_but_list[i] = '*'
-            word_low_copy = ''.join(word_but_list)
-            correct_pos.append(message[i])
-            pic.rectangle((15 + i * gap, 15 + times * gap, 54 + i * gap, 54 + times * gap), fill=color_blue)
-        elif message[i] in word_low_copy:
-            word_low_copy = word_low_copy.replace(message[i], '*', 1)
-            is_in_word.append(message[i])
-            pic.rectangle((15 + i * gap, 15 + times * gap, 54 + i * gap, 54 + times * gap), fill=color_light_gray)
-        pic.paste(alphabet, (35 + i * gap - int(alphabet.w / 2), 32 + times * gap - int(alphabet.h / 2)), alpha=True)
-    
-    if len(correct_pos) == length:
-        # 猜对了
-        img_msg = build_image_msg(event, pic.pic2bs4())
-        await bot.send(event, img_msg + f'\n你猜出了这个单词！\n{word}\n{pos}{trans}', at_sender=True)
-        close_session(gid)
-    else:
-        session['times'] += 1
-        if session['times'] == session['total_times']:
-            # 次数用完
-            img_msg = build_image_msg(event, pic.pic2bs4())
-            await bot.send(event, img_msg + f'\n次数用完了，没有人猜对...\n{word}\n{pos}{trans}', at_sender=True)
-            close_session(gid)
-        else:
-            # 继续游戏
-            pic.save(str(temp_path / f'{gid}.png'))
-            img_msg = build_image_msg(event, pic.pic2bs4())
-            await bot.send(event, img_msg)
+
+    picture, is_correct = _draw_english_guess(
+        gid,
+        message,
+        word_low,
+        times,
+    )
+    await _finish_guess_round(
+        event,
+        bot,
+        gid,
+        session,
+        picture,
+        is_correct,
+        f'\n你猜出了这个单词！\n{word}\n{pos}{trans}',
+        f'\n次数用完了，没有人猜对...\n{word}\n{pos}{trans}',
+    )
 
 
 async def handle_digit_guess(event: Event, bot: Bot, gid: str, session: Dict, message: str):
     """处理数字猜测"""
     answer = session['answer']
-    answer_str = str(answer)
     length = session['length']
     times = session['times']
     
     # 检查是否过期
     if is_expired(session):
-        close_session(gid)
-        pic_path = temp_path / f'{gid}.png'
-        if pic_path.exists():
-            pic = BuildImage(0, 0, background=str(pic_path))
-            img_msg = build_image_msg(event, pic.pic2bs4())
-            await bot.send(event, img_msg + f'时间已过，正确答案是{answer}')
-        else:
-            await bot.send(event, f'时间已过，正确答案是{answer}')
+        await _send_expired_result(
+            event,
+            bot,
+            gid,
+            f'时间已过，正确答案是{answer}',
+        )
         return
     
     # 检查输入
@@ -504,57 +726,22 @@ async def handle_digit_guess(event: Event, bot: Bot, gid: str, session: Dict, me
         await bot.send(event, f'要猜的数字为{length}位数喔', at_sender=True)
         return
     
-    # 比较结果 (双重遍历以确保逻辑严谨)
-    result_colors = [None] * length
-    ans_list = list(str(answer))
-    correct_pos = []
-
-    pic = BuildImage(0, 0, background=str(temp_path / f'{gid}.png'))
-    
-    if int(message) > answer:
-        digit_color = color_red
-    elif int(message) < answer:
-        digit_color = color_green
-    else:
-        digit_color = font_color
-    
-    # 第一遍：处理完全正確 (Blue)
-    for i in range(length):
-        if message[i] == ans_list[i]:
-            result_colors[i] = color_blue
-            ans_list[i] = None  # 标记为已匹配
-            correct_pos.append(message[i])
-
-    # 第二遍：处理存在但位置不对 (Orange)
-    for i in range(length):
-        if result_colors[i] is None:  # 只处理未匹配的
-            if message[i] in ans_list:
-                result_colors[i] = color_orange
-                ans_list.remove(message[i])  # 消耗一个字符
-                
-    # 绘制结果
-    for i in range(length):
-        digit = BuildImage(0, 0, plain_text=message[i], font=font_bold, font_size=30, font_color=digit_color, is_alpha=True)
-        if result_colors[i] == color_blue:
-            pic.rectangle((15 + i * gap, 15 + times * gap, 54 + i * gap, 54 + times * gap), fill=color_blue)
-        elif result_colors[i] == color_orange:
-            pic.rectangle((15 + i * gap, 15 + times * gap, 54 + i * gap, 54 + times * gap), fill=color_orange)
-        pic.paste(digit, (34 + i * gap - int(digit.w / 2), 32 + times * gap - int(digit.h / 2)), alpha=True)
-    
-    if len(correct_pos) == length:
-        img_msg = build_image_msg(event, pic.pic2bs4())
-        await bot.send(event, img_msg + f'\n你猜出了这个数字！\n它是{answer}', at_sender=True)
-        close_session(gid)
-    else:
-        session['times'] += 1
-        if session['times'] == session['total_times']:
-            img_msg = build_image_msg(event, pic.pic2bs4())
-            await bot.send(event, img_msg + f'\n次数用完了，没有人猜对...\n它是{answer}', at_sender=True)
-            close_session(gid)
-        else:
-            pic.save(str(temp_path / f'{gid}.png'))
-            img_msg = build_image_msg(event, pic.pic2bs4())
-            await bot.send(event, img_msg)
+    picture, is_correct = _draw_digit_guess(
+        gid,
+        message,
+        answer,
+        times,
+    )
+    await _finish_guess_round(
+        event,
+        bot,
+        gid,
+        session,
+        picture,
+        is_correct,
+        f'\n你猜出了这个数字！\n它是{answer}',
+        f'\n次数用完了，没有人猜对...\n它是{answer}',
+    )
 
 
 async def handle_japanese_guess(event: Event, bot: Bot, gid: str, session: Dict, message: str):
@@ -569,14 +756,12 @@ async def handle_japanese_guess(event: Event, bot: Bot, gid: str, session: Dict,
     
     # 检查是否过期
     if is_expired(session):
-        close_session(gid)
-        pic_path = temp_path / f'{gid}.png'
-        if pic_path.exists():
-            pic = BuildImage(0, 0, background=str(pic_path))
-            img_msg = build_image_msg(event, pic.pic2bs4())
-            await bot.send(event, img_msg + f'时间已过，正确答案是{kana}\n{yomi}{mean}\n{sample}')
-        else:
-            await bot.send(event, f'时间已过，正确答案是{kana}\n{yomi}{mean}\n{sample}')
+        await _send_expired_result(
+            event,
+            bot,
+            gid,
+            f'时间已过，正确答案是{kana}\n{yomi}{mean}\n{sample}',
+        )
         return
     
     # 检查输入是否为假名
@@ -588,33 +773,19 @@ async def handle_japanese_guess(event: Event, bot: Bot, gid: str, session: Dict,
         await bot.send(event, f'要猜的单词为{length}个纯假名喔', at_sender=True)
         return
     
-    # 比较结果
-    correct_pos = []
-    is_in_word = []
-    
-    pic = BuildImage(0, 0, background=str(temp_path / f'{gid}.png'))
-    
-    for i in range(length):
-        hinagara = BuildImage(0, 0, plain_text=message[i], font=font_bold, font_size=28, font_color=font_color, is_alpha=True)
-        if message[i] == kana[i]:
-            correct_pos.append(message[i])
-            pic.rectangle((15 + i * gap, 15 + times * gap, 54 + i * gap, 54 + times * gap), fill=color_blue)
-        elif message[i] in kana:
-            is_in_word.append(message[i])
-            pic.rectangle((15 + i * gap, 15 + times * gap, 54 + i * gap, 54 + times * gap), fill=color_light_gray)
-        pic.paste(hinagara, (35 + i * gap - int(hinagara.w / 2), 33 + times * gap - int(hinagara.h / 2)), alpha=True)
-    
-    if len(correct_pos) == length:
-        img_msg = build_image_msg(event, pic.pic2bs4())
-        await bot.send(event, img_msg + f'\n你拼出了这个单词！\n{jpword}({kana})\n{yomi}{mean}{sample}', at_sender=True)
-        close_session(gid)
-    else:
-        session['times'] += 1
-        if session['times'] == session['total_times']:
-            img_msg = build_image_msg(event, pic.pic2bs4())
-            await bot.send(event, img_msg + f'\n次数用完了，没有人答对...\n\n{jpword}({kana})\n{yomi}{mean}{sample}', at_sender=True)
-            close_session(gid)
-        else:
-            pic.save(str(temp_path / f'{gid}.png'))
-            img_msg = build_image_msg(event, pic.pic2bs4())
-            await bot.send(event, img_msg)
+    picture, is_correct = _draw_japanese_guess(
+        gid,
+        message,
+        kana,
+        times,
+    )
+    await _finish_guess_round(
+        event,
+        bot,
+        gid,
+        session,
+        picture,
+        is_correct,
+        f'\n你拼出了这个单词！\n{jpword}({kana})\n{yomi}{mean}{sample}',
+        f'\n次数用完了，没有人答对...\n\n{jpword}({kana})\n{yomi}{mean}{sample}',
+    )

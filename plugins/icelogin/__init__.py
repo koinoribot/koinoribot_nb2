@@ -39,6 +39,7 @@ __plugin_meta__ = PluginMetadata(
 # 频率限制器
 login_limiter = FreqLimiter(60)
 purse_limiter = FreqLimiter(30)
+UNSUPPORTED_PLATFORM_MESSAGE = "不支持的平台类型"
 
 
 # ===== 签到命令 =====
@@ -170,7 +171,7 @@ async def handle_gold_ranking(
     
     msg_parts.append(f"\n{user_rank_msg}")
 
-    msg_parts.append(f"\n\n\n使用 冰祈请叫我 可以修改自己的昵称哦~")
+    msg_parts.append("\n\n\n使用 冰祈请叫我 可以修改自己的昵称哦~")
     
     msg_str = "\n".join(msg_parts)
     chain = await build_forward_chain(bot, [msg_str])
@@ -200,7 +201,7 @@ async def handle_upload_bg(
             if seg.type == "image":
                 image_url = seg.data.get("url") or seg.data.get("file")
                 break
-    except:
+    except (AttributeError, TypeError):
         pass
     
     if not image_url:
@@ -323,9 +324,13 @@ async def handle_register_code(
     # 检查是否为私聊
     from nonebot.adapters.qq.event import C2CMessageCreateEvent
     is_private = False
-    if is_onebot(event) and isinstance(event, onebot_adapter.PrivateMessageEvent):
-        is_private = True
-    elif is_qqbot(event) and isinstance(event, C2CMessageCreateEvent):
+    if (
+        is_onebot(event)
+        and isinstance(event, onebot_adapter.PrivateMessageEvent)
+    ) or (
+        is_qqbot(event)
+        and isinstance(event, C2CMessageCreateEvent)
+    ):
         is_private = True
 
     if not is_private:
@@ -392,7 +397,7 @@ async def handle_bind(
     elif is_qqbot(event):
         current_platform = "qqbot"
     else:
-        await bind_cmd.finish("不支持的平台类型", at_sender=True)
+        await bind_cmd.finish(UNSUPPORTED_PLATFORM_MESSAGE, at_sender=True)
         return
 
     current_external_id = event.get_user_id()
@@ -510,12 +515,8 @@ async def handle_unbind(
 
     external_ids = get_external_ids(uid)
 
-    if is_onebot(event):
-        platform_col = "onebot_id"
-    elif is_qqbot(event):
-        platform_col = "qqbot_id"
-    else:
-        await unbind_cmd.finish("不支持的平台类型", at_sender=True)
+    if not is_onebot(event) and not is_qqbot(event):
+        await unbind_cmd.finish(UNSUPPORTED_PLATFORM_MESSAGE, at_sender=True)
         return
 
     # 检查是否已绑定了两个平台
@@ -549,7 +550,7 @@ async def handle_unbind_confirm(
         platform = "qqbot"
         platform_col = "qqbot_id"
     else:
-        await unbind_cmd.finish("不支持的平台类型", at_sender=True)
+        await unbind_cmd.finish(UNSUPPORTED_PLATFORM_MESSAGE, at_sender=True)
         return
 
     # 将当前平台ID从uid中移除
@@ -573,6 +574,58 @@ async def handle_unbind_confirm(
 upload_avatar_cmd = on_command("上传头像", priority=5, block=True)
 
 
+def _image_url_from_segments(message) -> str | None:
+    for segment in message:
+        if segment.type in {"image", "attachment"}:
+            return segment.data.get("url") or segment.data.get("file")
+    return None
+
+
+def _image_url_from_attachments(attachments) -> str | None:
+    for attachment in attachments:
+        attachment_url = getattr(attachment, "url", None)
+        if attachment_url:
+            return attachment_url
+    return None
+
+
+def _extract_avatar_image_url(event: Event) -> str | None:
+    if is_onebot(event):
+        return _image_url_from_segments(event.message)
+    if not is_qqbot(event):
+        return None
+    attachments = getattr(event, "attachments", None)
+    if attachments:
+        return _image_url_from_attachments(attachments)
+    return _image_url_from_segments(event.message)
+
+
+async def _download_avatar_image(image_url: str):
+    async with aiohttp.ClientSession() as session:
+        async with session.get(image_url) as response:
+            content = await response.read()
+    return Image.open(BytesIO(content)).convert("RGBA")
+
+
+def _crop_avatar_image(image):
+    width, height = image.size
+    length = min(width, height)
+    left = (width - length) // 2
+    top = (height - length) // 2
+    image = image.crop((left, top, left + length, top + length))
+    if hasattr(Image, "Resampling"):
+        resample_method = Image.Resampling.LANCZOS
+    else:
+        resample_method = Image.ANTIALIAS
+    return image.resize((256, 256), resample_method)
+
+
+def _save_avatar_image(image, uid: int):
+    save_dir = os.path.join(get_src_path(), "avatar")
+    os.makedirs(save_dir, exist_ok=True)
+    image.save(os.path.join(save_dir, f"{uid}.png"), format="PNG")
+
+
 @upload_avatar_cmd.handle()
 async def handle_upload_avatar(
     event: Event, 
@@ -580,75 +633,17 @@ async def handle_upload_avatar(
     uid: int = Depends(get_uid)
 ):
     """处理上传头像命令"""
-    # 从消息中提取图片URL
-    image_url = None
-    
-    # 根据适配器类型尝试提取图片
-    from ...tools import is_qqbot, is_onebot
-    
-    if is_onebot(event):
-        for seg in event.message:
-            if seg.type == "image":
-                image_url = seg.data.get("url") or seg.data.get("file")
-                break
-    elif is_qqbot(event):
-        # 官bot (QQBot): 附件中的图片为 Attachment 形式，或者在 message 当中
-        if hasattr(event, "attachments") and event.attachments:
-            for attachment in event.attachments:
-                # content_type 可能是 'image/jpeg' 等等，或者是根据 type='image' 或者有 url 字段来判断
-                if hasattr(attachment, "content_type") and "image" in str(attachment.content_type).lower():
-                    image_url = attachment.url
-                    # 官bot 返回的 url 可能以 http:// 开头，需要手动转成 https 提供下载，看接口表现，这里先直接取 url
-                    break
-                elif hasattr(attachment, "url") and attachment.url:
-                    image_url = attachment.url
-                    break
-        else:
-            # 如果从 message 下解析 QQBot 的 Attachment Segment
-            for seg in event.message:
-                if seg.type == "image" or seg.type == "attachment":
-                    image_url = seg.data.get("url")
-                    break
-                    
+    image_url = _extract_avatar_image_url(event)
     if not image_url:
         await upload_avatar_cmd.finish("请加上图片一起发送哦~", at_sender=True)
         return
-    
-    # 下载并保存裁剪图片
+
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(image_url) as r:
-                content = await r.read()
-                
-        img = Image.open(BytesIO(content)).convert("RGBA")
+        image = await _download_avatar_image(image_url)
+        _save_avatar_image(_crop_avatar_image(image), uid)
     except (aiohttp.ClientError, OSError, ValueError) as e:
         logger.error(f"上传头像失败: {e}")
         await upload_avatar_cmd.finish("头像上传失败或图片格式不正确...", at_sender=True)
         return
 
-    w, h = img.size
-    
-    # 居中裁剪为正方形 (1:1 取中间部分)
-    length = min(w, h)
-    left = (w - length) // 2
-    top = (h - length) // 2
-    right = left + length
-    bottom = top + length
-    img = img.crop((left, top, right, bottom))
-    
-    # 压缩图片以节省空间并统一大小
-    if hasattr(Image, 'Resampling'):
-        resample_method = Image.Resampling.LANCZOS
-    else:
-        resample_method = Image.ANTIALIAS
-    img = img.resize((256, 256), resample_method)
-    
-    # 保存为 png
-    srcpath = get_src_path()
-    save_dir = os.path.join(srcpath, "avatar")
-    os.makedirs(save_dir, exist_ok=True)
-    save_path = os.path.join(save_dir, f"{uid}.png")
-    
-    img.save(save_path, format="PNG")
-    
     await upload_avatar_cmd.finish("头像上传成功并已自动裁剪~", at_sender=True)

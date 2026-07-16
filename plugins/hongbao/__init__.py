@@ -79,6 +79,15 @@ def close_session(group_id: str):
         del _sessions[group_id]
 
 
+def _parse_hongbao_args(message: str) -> tuple[int, int] | None:
+    parts = message.split()
+    if not parts:
+        return None
+    amount = int(parts[0])
+    packet_count = int(parts[1]) if len(parts) > 1 else 5
+    return amount, packet_count
+
+
 # ===== 发红包命令 =====
 fa_hongbao = on_command("发红包", priority=5, block=True)
 
@@ -96,34 +105,21 @@ async def handle_fa_hongbao(
     if not group_id:
         await fa_hongbao.finish("红包功能仅支持群聊")
     
-    # 检查是否有进行中的红包
-    existing = get_session(group_id)
-    if existing:
-        if existing.is_expired:
-            # 过期处理
-            return_amount = existing.remaining_amount
-            if return_amount > 0:
-                money.of(existing.owner_uid).gold += return_amount
-            close_session(group_id)
-        else:
-            await fa_hongbao.finish("当前还有没领完的金币红包~")
+    if get_session(group_id):
+        await fa_hongbao.finish("当前还有没领完的金币红包~")
     
     # 频率限制
     if not freq.check(uid):
         await fa_hongbao.finish("十秒钟之内只能发一个红包")
     
-    # 解析参数
     message = args.extract_plain_text()
-    parts = message.split()
-    
-    if not parts:
-        await fa_hongbao.finish("用法: 发红包 金额 [份数]\n例如: 发红包 1000 5")
-    
     try:
-        amount = int(parts[0])
-        num_packets = int(parts[1]) if len(parts) > 1 else 5
+        parsed_args = _parse_hongbao_args(message)
     except ValueError:
         await fa_hongbao.finish("金额和份数必须是数字")
+    if parsed_args is None:
+        await fa_hongbao.finish("用法: 发红包 金额 [份数]\n例如: 发红包 1000 5")
+    amount, num_packets = parsed_args
     
     if num_packets <= 2:
         await fa_hongbao.finish("红包份数至少要3份")

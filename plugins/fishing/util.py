@@ -1,9 +1,3 @@
-"""
-钓鱼插件工具模块 - util.py
-
-包含数据库管理和冷却时间管理类
-"""
-
 import sqlite3
 import time
 from datetime import datetime
@@ -12,6 +6,47 @@ from typing import Optional, Dict
 from nonebot import logger
 
 from ...koinori_config import config
+
+
+def _fish_limit_statement(
+    result,
+    today: str,
+    count: int,
+    default_limit: int,
+):
+    if result is None:
+        if count < 0:
+            return (
+                'INSERT INTO fish_limit (uid, date_str, count, limit_count) VALUES (?, ?, 0, ?)',
+                (today, default_limit - count),
+            )
+        return (
+            'INSERT INTO fish_limit (uid, date_str, count, limit_count) VALUES (?, ?, ?, ?)',
+            (today, count, default_limit),
+        )
+
+    date_str, current_count, current_limit = result
+    if date_str != today:
+        reset_count = 0 if count < 0 else count
+        reset_limit = default_limit - count if count < 0 else default_limit
+        return (
+            'UPDATE fish_limit SET date_str = ?, count = ?, limit_count = ?, updated_time = CURRENT_TIMESTAMP WHERE uid = ?',
+            (today, reset_count, reset_limit),
+        )
+
+    if count < 0:
+        return (
+            'UPDATE fish_limit SET limit_count = ?, updated_time = CURRENT_TIMESTAMP WHERE uid = ?',
+            (current_limit - count,),
+        )
+
+    new_count = current_count + count
+    if new_count > current_limit:
+        return None
+    return (
+        'UPDATE fish_limit SET count = ?, updated_time = CURRENT_TIMESTAMP WHERE uid = ?',
+        (new_count,),
+    )
 
 
 class DatabaseManager:
@@ -123,67 +158,24 @@ class DatabaseManager:
         cursor = conn.cursor()
         
         try:
-            # 查询用户今天的记录
             cursor.execute(
                 'SELECT date_str, count, limit_count FROM fish_limit WHERE uid = ?', 
                 (uid,)
             )
             result = cursor.fetchone()
-            
-            # 每日限制，默认值
             default_limit = config.fish_limit_count
-            
-            if result:
-                date_str, current_count, current_limit_count = result
-                
-                # 如果是同一天
-                if date_str == today_str:
-                    # 负数直接增加 limit_count
-                    if count < 0:
-                        new_limit_count = current_limit_count - count
-                        cursor.execute(
-                            'UPDATE fish_limit SET limit_count = ?, updated_time = CURRENT_TIMESTAMP WHERE uid = ?',
-                            (new_limit_count, uid)
-                        )
-                    else:
-                        # 正常情况：检查是否超过上限
-                        new_count = current_count + count
-                        if new_count > current_limit_count:
-                            conn.close()
-                            return False
-                        # 更新计数
-                        cursor.execute(
-                            'UPDATE fish_limit SET count = ?, updated_time = CURRENT_TIMESTAMP WHERE uid = ?',
-                            (new_count, uid)
-                        )
-                else:
-                    # 不是同一天，重置计数和限制次数
-                    if count < 0:
-                        # 对于负数，重置后增加 limit_count
-                        new_limit_count = default_limit - count
-                        cursor.execute(
-                            'UPDATE fish_limit SET date_str = ?, count = 0, limit_count = ?, updated_time = CURRENT_TIMESTAMP WHERE uid = ?',
-                            (today_str, new_limit_count, uid)
-                        )
-                    else:
-                        # 对于正数，正常重置
-                        cursor.execute(
-                            'UPDATE fish_limit SET date_str = ?, count = ?, limit_count = ?, updated_time = CURRENT_TIMESTAMP WHERE uid = ?',
-                            (today_str, count, default_limit, uid)
-                        )
-            else:
-                # 没有记录，插入新记录
-                if count < 0:
-                    new_limit_count = default_limit - count
-                    cursor.execute(
-                        'INSERT INTO fish_limit (uid, date_str, count, limit_count) VALUES (?, ?, 0, ?)',
-                        (uid, today_str, new_limit_count)
-                    )
-                else:
-                    cursor.execute(
-                        'INSERT INTO fish_limit (uid, date_str, count, limit_count) VALUES (?, ?, ?, ?)',
-                        (uid, today_str, count, default_limit)
-                    )
+            statement = _fish_limit_statement(
+                result,
+                today_str,
+                count,
+                default_limit,
+            )
+            if statement is None:
+                conn.close()
+                return False
+
+            sql, parameters = statement
+            cursor.execute(sql, (uid, *parameters) if sql.startswith('INSERT') else (*parameters, uid))
             
             conn.commit()
             conn.close()

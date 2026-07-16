@@ -48,6 +48,7 @@ after_twenty_four_time = 0
 
 
 answer_path = Path(__file__).parent / "answer.json"
+GROUP_ONLY_MESSAGE = "本功能仅支持群组使用"
 
 
 @twenty_four_start.handle()
@@ -56,7 +57,7 @@ async def twenty_four_handle(event: Event) -> None:
     try:
         group_id = get_group_id(event)
     except ValueError:
-        await twenty_four_start.finish("本功能仅支持群组使用")
+        await twenty_four_start.finish(GROUP_ONLY_MESSAGE)
     # 检查群是否已存在游戏
     if group_id in twenty_four_games:
         game = twenty_four_games[group_id]
@@ -94,7 +95,7 @@ async def twenty_four_hint_handle(event: Event) -> None:
     try:
         group_id = get_group_id(event)
     except ValueError:
-        await twenty_four_hint.finish("本功能仅支持群组使用")
+        await twenty_four_hint.finish(GROUP_ONLY_MESSAGE)
     if group_id not in twenty_four_games:
         await twenty_four_hint.finish("当前没有进行中的24点游戏哦")
     game = twenty_four_games[group_id]
@@ -113,7 +114,7 @@ async def twenty_four_answer_handle(event: Event, args: Message = CommandArg()) 
     try:
         group_id = get_group_id(event)
     except ValueError:
-        await get_twenty_four_answer.finish("本功能仅支持群组使用")
+        await get_twenty_four_answer.finish(GROUP_ONLY_MESSAGE)
     # 检查游戏列表中是否有该群的游戏
     if group_id not in twenty_four_games:
         await get_twenty_four_answer.finish("当前没有进行中的24点游戏哦")

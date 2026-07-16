@@ -1,9 +1,3 @@
-"""
-飞升系统数据模块
-
-处理飞升相关的数据存储
-"""
-
 import sqlite3
 import json
 import asyncio
@@ -55,7 +49,7 @@ def init_feisheng_database():
         
         conn.commit()
         conn.close()
-    except Exception as e:
+    except Exception:
         # 如果uid_manager还没初始化db_path，可能会报错，忽略或记录日志
         pass
 
@@ -184,7 +178,7 @@ def init_feisheng_items_table():
         
         conn.commit()
         conn.close()
-    except Exception as e:
+    except Exception:
         pass
 
 async def get_user_feisheng_items(uid: int) -> Dict[str, int]:

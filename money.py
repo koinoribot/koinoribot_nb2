@@ -32,7 +32,7 @@ DEFAULT_ASSETS = {
 # 资产上限
 GOLD_MAX = get_config().gold_max
 
-KEYWORD_LIST = list(DEFAULT_ASSETS.keys())
+KEYWORD_LIST = list(DEFAULT_ASSETS)
 KEYWORD_SET = set(KEYWORD_LIST)
 KEY_LIST = ["gold", "luckygold", "starstone", "kirastone"]
 

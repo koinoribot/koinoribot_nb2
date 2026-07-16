@@ -27,27 +27,42 @@ class Choicer:
 
     def _compile(self, data: Any) -> Any:
         if isinstance(data, list):
-            choices = []
-            for item in data:
-                if isinstance(item, str) and item.startswith("{") and item.endswith("}"):
-                    for compiled_item in self.map[item[1:-1]]:
-                        choices.append(compiled_item[0])
-                else:
-                    choices.append(item)
-            probability = 1.0 / len(choices)
-            return [(self._compile(item), probability) for item in choices]
+            return self._compile_choices(data)
 
         if isinstance(data, str):
             return data
 
         if isinstance(data, dict):
-            if "start" in data:
-                return [(self._compile(data["d"]), data["p"], data["start"])]
-            if "p" in data:
-                return [(self._compile(data["d"]), data["p"])]
-            return [(self._compile(value), probability) for value, probability in data.items()]
+            return self._compile_mapping(data)
 
         return []
+
+    def _compile_choices(self, data: list[Any]) -> list:
+        choices = []
+        for item in data:
+            if (
+                isinstance(item, str)
+                and item.startswith("{")
+                and item.endswith("}")
+            ):
+                choices.extend(
+                    compiled_item[0]
+                    for compiled_item in self.map[item[1:-1]]
+                )
+            else:
+                choices.append(item)
+        probability = 1.0 / len(choices)
+        return [(self._compile(item), probability) for item in choices]
+
+    def _compile_mapping(self, data: dict) -> list:
+        if "start" in data:
+            return [(self._compile(data["d"]), data["p"], data["start"])]
+        if "p" in data:
+            return [(self._compile(data["d"]), data["p"])]
+        return [
+            (self._compile(value), probability)
+            for value, probability in data.items()
+        ]
 
     def _set_seed(self, user_id: int | str) -> None:
         date_factor = int((time.time() + 28800) // 86400) if self.date else 1
@@ -85,23 +100,29 @@ class Choicer:
         if isinstance(data, str):
             return self._run_template(data)
 
-        if isinstance(data, list):
-            if len(data) == 1 and len(data[0]) == 3:
-                compiled_template, probability, index = data[0]
-                fragments = []
-                while True:
-                    fragments.append(self._run_template(compiled_template, {"i": str(index)}))
-                    index += 1
-                    if self.rand.random() >= probability:
-                        break
+        if not isinstance(data, list):
+            return ""
+        if len(data) == 1 and len(data[0]) == 3:
+            return self._run_repeating(data[0])
+        return self._run_weighted(data)
+
+    def _run_repeating(self, data: tuple) -> str:
+        compiled_template, probability, index = data
+        fragments = []
+        while True:
+            fragments.append(
+                self._run_template(compiled_template, {"i": str(index)})
+            )
+            index += 1
+            if self.rand.random() >= probability:
                 return "".join(fragments)
 
-            roll = self.rand.random()
-            for compiled_item, probability in data:
-                if probability > roll:
-                    return self._run(compiled_item)
-                roll -= probability
-
+    def _run_weighted(self, data: list) -> str:
+        roll = self.rand.random()
+        for compiled_item, probability in data:
+            if probability > roll:
+                return self._run(compiled_item)
+            roll -= probability
         return ""
 
     def format_msg(self, user_id: int | str, name: str) -> str:

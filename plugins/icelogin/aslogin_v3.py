@@ -10,12 +10,10 @@ import io
 import random
 import time
 import os
-import hashlib
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-import tempfile
-import uuid
 
 import aiohttp
 
@@ -29,6 +27,8 @@ add_watermark = 0
 debug_login_flag = 0
 save_image_mode = 0
 debug_background = 'Background2.jpg'
+SIGN_FONT = 'HYShiGuangTiW_0.ttf'
+BODY_FONT = 'yz.ttf'
 
 def _get_background_images(srcpath: str) -> list:
     """扫描 background 目录获取所有背景图片"""
@@ -41,6 +41,12 @@ def _get_background_images(srcpath: str) -> list:
     return files
 
 extra_bg_list = ['Background_extra.jpg']
+PURSE_NORMAL_BACKGROUNDS = [
+    'purse_01.jpg',
+    'purse_02.jpg',
+    'purse_05.jpg',
+    'purse_09.jpg',
+]
 
 # 宜忌列表
 goodluck = [
@@ -111,7 +117,7 @@ async def fetch_avatar(url: str) -> bytes:
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as r:
                 return await r.read()
-    except:
+    except (aiohttp.ClientError, asyncio.TimeoutError):
         return b''
 
 
@@ -159,18 +165,477 @@ def feed_back(value: int) -> str:
         return "999！！是隐藏的999运势！！！"
 
 
-def save_to_local(img: BuildImage, prefix: str) -> bytes:
+def save_to_local(img: BuildImage) -> bytes:
     """将图片转为 bytes 返回，由调用方根据适配器类型构建消息段"""
     from io import BytesIO
     buf = BytesIO()
-    img.markImg.save(buf, format="PNG")
+    img.mark_img.save(buf, format="PNG")
     return buf.getvalue()
+
+
+@dataclass
+class LoginCardState:
+    festival_msg: str
+    birthday_msg: str
+    extra_msg: str
+    total_get_msg: str
+    login_flag: int
+    rp: int
+    info: str
+    good_luck_msg: str
+    bad_luck_msg: str
+    date_msg: str
+
+
+def _special_day_messages(flag: str, login_flag: int):
+    festival_msg = ''
+    birthday_msg = ''
+    extra_msg = ''
+    birth_flag = 0
+    event_flag = 0
+    if flag in birth_list:
+        birth_flag = 1
+        birthday_msg = f'{member_list[birth_list.index(flag)]}的生日'
+        if not login_flag:
+            extra_msg += '☆ 星星+2400(生日)\n☆ 金币+5000(生日)\n'
+    if flag in event_list:
+        event_flag = 1
+        festival_msg = event_name_list[event_list.index(flag)]
+        if not login_flag:
+            extra_msg += '☆ 星星+1600(节日)\n☆ 金币+3600(节日)\n'
+    return festival_msg, birthday_msg, extra_msg, birth_flag, event_flag
+
+
+def _lucky_gold_for_rp(rp: int, login_flag: int) -> int:
+    if login_flag:
+        return 0
+    if 90 <= rp <= 99:
+        return max(1, min(5, rp - 90))
+    if rp == 100:
+        return 10
+    if rp > 100:
+        return 20
+    return 0
+
+
+def _build_login_card_state(uid: int, wallet, current_time) -> LoginCardState:
+    days = int(time.strftime("%d", current_time))
+    months = int(time.strftime("%m", current_time))
+    week = int(time.strftime("%w", current_time))
+    login_flag = 1 if int(f'{months}0{days}') == wallet.last_login else 0
+    flag = f'{months:02d}{days:02d}'
+    (
+        festival_msg,
+        birthday_msg,
+        extra_msg,
+        birth_flag,
+        event_flag,
+    ) = _special_day_messages(flag, login_flag)
+
+    if not login_flag:
+        wallet.logindays += 1
+
+    rp_hash = wallet.rp if login_flag else _hash()
+    rp = rp_hash % 101
+    info = feed_back(rp)
+    good_todo_index = wallet.goodluck if login_flag else luck_choice(0)
+    bad_todo_index = wallet.badluck if login_flag else luck_choice(1)
+    if good_todo_index == bad_todo_index:
+        bad_todo_index = (bad_todo_index + 1) % len(badluck)
+    good_luck_msg = goodluck[good_todo_index % len(goodluck)]
+    bad_luck_msg = badluck[bad_todo_index % len(badluck)]
+
+    lucky_gold = _lucky_gold_for_rp(rp, login_flag)
+    lucky_gold_msg = ''
+    if lucky_gold:
+        extra_msg += f'☆ 幸运币+{lucky_gold} (人品)\n'
+        lucky_gold_msg = f'☆ 幸运币+{lucky_gold}\n'
+        wallet.luckygold += lucky_gold
+
+    gold = 100 + rp
+    logindays = wallet.logindays
+    star_add = min(
+        random.randint(100 + logindays // 5 * 25, 200 + logindays // 5 * 50),
+        5000,
+    )
+    gold_add = min(
+        random.randint(50 + logindays // 2 * 5, 100 + logindays * 5),
+        2500,
+    )
+    date_msg = f'{months}月{days}日星期{week_list[week]}   已签到{logindays}天'
+    total_get_msg = ''
+    if not login_flag:
+        star_reward = rp * 5 + birth_flag * 2400 + event_flag * 1600 + star_add
+        gold += birth_flag * 5000 + event_flag * 3600 + gold_add
+        wallet.starstone += star_reward
+        wallet.gold += gold
+        wallet.last_login = int(f'{months}0{days}')
+        wallet.rp = rp_hash
+        wallet.goodluck = good_todo_index
+        wallet.badluck = bad_todo_index
+        total_get_msg = f'☆ 星星+{star_reward}\n☆ 金币+{gold}\n{lucky_gold_msg}'
+        if logindays >= 10:
+            extra_msg += f'☆ 星星+{star_add} (累签)\n☆ 金币+{gold_add} (累签)\n'
+
+    if uid == 80000000:
+        rp = -1
+        info = '  Vanitas vanitatum,Et omnia vanitas.'
+        good_luck_msg = '宜 取消匿名'
+        bad_luck_msg = '忌 匿名'
+        date_msg = f'{months}月{days}日星期{week_list[week]}'
+        total_get_msg = '△ 无'
+        extra_msg = ''
+        login_flag = 0
+
+    return LoginCardState(
+        festival_msg=festival_msg,
+        birthday_msg=birthday_msg,
+        extra_msg=extra_msg,
+        total_get_msg=total_get_msg,
+        login_flag=login_flag,
+        rp=rp,
+        info=info,
+        good_luck_msg=good_luck_msg,
+        bad_luck_msg=bad_luck_msg,
+        date_msg=date_msg,
+    )
+
+
+def _normal_login_background(srcpath: str, uid: int) -> BuildImage:
+    background_list = _get_background_images(srcpath)
+    if uid == 80000000:
+        background_name = extra_bg_list[0]
+    else:
+        background_name = (
+            random.choice(background_list)
+            if background_list
+            else extra_bg_list[0]
+        )
+    image_file = os.path.join(srcpath, 'background', background_name)
+    if not os.path.exists(image_file):
+        image_file = (
+            os.path.join(srcpath, 'background', background_list[0])
+            if background_list
+            else None
+        )
+    return BuildImage(
+        0,
+        0,
+        font_size=30,
+        background=image_file,
+        font=SIGN_FONT,
+    )
+
+
+def _custom_login_background(
+    srcpath: str,
+    custom_bg_path: str,
+) -> BuildImage:
+    background = BuildImage(
+        0,
+        0,
+        font_size=30,
+        background=os.path.join(srcpath, 'whiteboard.jpg'),
+        font=SIGN_FONT,
+    )
+    try:
+        custom_background = BuildImage(
+            0,
+            0,
+            font_size=30,
+            background=custom_bg_path,
+            font=SIGN_FONT,
+        )
+        if custom_background.w > custom_background.h * 16 / 9:
+            custom_background.resize(ratio=540 / custom_background.h)
+        else:
+            custom_background.resize(ratio=960 / custom_background.w)
+        background.paste(
+            custom_background,
+            (
+                int(480 - custom_background.w / 2),
+                int(270 - custom_background.h / 2),
+            ),
+            True,
+        )
+    except (OSError, TypeError, ValueError):
+        pass
+    mask_path = os.path.join(srcpath, 'login_background_custom.png')
+    if os.path.exists(mask_path):
+        mask = BuildImage(
+            0,
+            0,
+            font_size=30,
+            background=mask_path,
+            font=SIGN_FONT,
+        )
+        background.paste(mask, (0, 0), True)
+    return background
+
+
+def _build_login_background(srcpath: str, uid: int):
+    custom_bg_path = os.path.join(srcpath, 'customize', f'{uid}.jpg')
+    if os.path.exists(custom_bg_path):
+        return _custom_login_background(srcpath, custom_bg_path), 2, True
+    return _normal_login_background(srcpath, uid), 0, False
+
+
+def _paste_avatar_source(
+    background: BuildImage,
+    source,
+    size: int,
+    position: tuple[int, int],
+) -> bool:
+    try:
+        icon = BuildImage(0, 0, background=source)
+        width, _ = icon.size
+        icon.resize(ratio=size / width)
+        icon.circle()
+        background.paste(icon, position, True)
+        return True
+    except Exception:
+        return False
+
+
+async def _paste_user_avatar(
+    background: BuildImage,
+    srcpath: str,
+    uid: int,
+    avatar_url: str,
+    size: int,
+    position: tuple[int, int],
+) -> bool:
+    custom_avatar_path = os.path.join(srcpath, 'avatar', f'{uid}.png')
+    if os.path.exists(custom_avatar_path) and _paste_avatar_source(
+        background,
+        custom_avatar_path,
+        size,
+        position,
+    ):
+        return False
+
+    if avatar_url:
+        profile_image = await fetch_avatar(avatar_url)
+        if profile_image and _paste_avatar_source(
+            background,
+            io.BytesIO(profile_image),
+            size,
+            position,
+        ):
+            return False
+
+    default_avatar_path = os.path.join(srcpath, 'default_avatar.jpg')
+    if os.path.exists(default_avatar_path):
+        return _paste_avatar_source(
+            background,
+            default_avatar_path,
+            size,
+            position,
+        )
+    return False
+
+
+def _trim_display_name(name: str, max_length: int = 20) -> str:
+    if check_str_len(name) < max_length:
+        return name
+    result = ''
+    for character in name:
+        result += character
+        if check_str_len(result) >= max_length:
+            break
+    return result
+
+
+def _draw_login_identity(
+    background: BuildImage,
+    uid: int,
+    username: str,
+    qqname: str,
+    nick_flag: int,
+    state: LoginCardState,
+    border: int,
+):
+    date_text = BuildImage(
+        0,
+        0,
+        plain_text=state.date_msg,
+        font_size=30,
+        font='nyan.ttf',
+        font_color=(77, 83, 149),
+        stroke_width=border,
+        stroke_fill=(255, 255, 255),
+    )
+    background.paste(date_text, (23, 473), True)
+    uid_text = BuildImage(
+        0,
+        0,
+        plain_text=f'UID：{uid}',
+        font_size=18,
+        font=BODY_FONT,
+        font_color=(77, 83, 149),
+        stroke_width=border,
+        stroke_fill=(255, 255, 255),
+    )
+    background.paste(uid_text, (23, 510), True)
+    name_text = BuildImage(
+        0,
+        0,
+        plain_text=_trim_display_name(qqname),
+        font_size=30,
+        font=BODY_FONT,
+        font_color=(77, 83, 149),
+        stroke_width=border,
+        stroke_fill=(255, 255, 255),
+    )
+    nickname_message = f"欢迎回来，{username}~" if nick_flag else "欢迎回来~"
+    if uid == 80000000:
+        nickname_message = "......"
+    nickname_text = BuildImage(
+        0,
+        0,
+        plain_text=nickname_message,
+        font_size=25,
+        font=BODY_FONT,
+        font_color=(77, 83, 149),
+        stroke_width=border,
+        stroke_fill=(255, 255, 255),
+    )
+    background.paste(name_text, (190, 30), True)
+    background.paste(nickname_text, (190, 75), True)
+
+
+def _festival_message(festival_msg: str, birthday_msg: str) -> str:
+    if festival_msg and birthday_msg:
+        return f'今天是{festival_msg}和{birthday_msg}~'
+    if festival_msg:
+        return f'今天是{festival_msg}~'
+    if birthday_msg:
+        return f'今天是{birthday_msg}~'
+    return ''
+
+
+def _rp_color(rp: int):
+    if rp < 0:
+        return (244, 93, 129)
+    if rp == 0:
+        return (100, 100, 100)
+    if rp <= 100:
+        return lab2rgb(86, 80 - rp * 1.6, 4)
+    return (68, 118, 244)
+
+
+def _draw_login_fortune(
+    background: BuildImage,
+    state: LoginCardState,
+    border: int,
+):
+    festival = _festival_message(state.festival_msg, state.birthday_msg)
+    if festival:
+        festival_image = BuildImage(
+            0,
+            0,
+            plain_text=festival,
+            font_size=30,
+            font=SIGN_FONT,
+            font_color=(77, 83, 149),
+            stroke_width=border,
+            stroke_fill=(255, 255, 255),
+        )
+        width, _ = festival_image.size
+        background.paste(festival_image, (int(215 - width / 2), 157), True)
+
+    background.text(
+        (49, 259),
+        state.good_luck_msg,
+        (77, 83, 149),
+        stroke_width=border,
+        stroke_fill=(255, 255, 255),
+    )
+    background.text(
+        (261, 259),
+        state.bad_luck_msg,
+        (77, 83, 149),
+        stroke_width=border,
+        stroke_fill=(255, 255, 255),
+    )
+    color = _rp_color(state.rp)
+    rp_number = BuildImage(
+        0,
+        0,
+        plain_text=str(state.rp),
+        font_size=60,
+        font='nyan.ttf',
+        font_color=color,
+        stroke_width=border,
+        stroke_fill=(255, 255, 255),
+    )
+    rp_width, _ = rp_number.size
+    background.paste(rp_number, (int(215 - rp_width / 2), 356), True)
+    info_image = BuildImage(
+        0,
+        0,
+        plain_text=state.info,
+        font_size=25,
+        font=SIGN_FONT,
+        font_color=color,
+        stroke_width=border,
+        stroke_fill=(255, 255, 255),
+    )
+    info_width, _ = info_image.size
+    background.paste(info_image, (int(215 - info_width / 2), 424), True)
+
+
+def _draw_login_rewards(
+    background: BuildImage,
+    srcpath: str,
+    state: LoginCardState,
+    has_custom_bg: bool,
+):
+    if state.login_flag:
+        flag_name = (
+            'login_flag_custom.png'
+            if has_custom_bg
+            else 'login_flag.png'
+        )
+        login_flag_icon_file = os.path.join(srcpath, flag_name)
+        if os.path.exists(login_flag_icon_file):
+            login_flag_image = BuildImage(
+                0,
+                0,
+                background=login_flag_icon_file,
+            )
+            background.paste(login_flag_image, (373, 174), True)
+        return
+
+    background.text(
+        (590, 70),
+        state.extra_msg,
+        (77, 83, 149),
+        stroke_width=2,
+        stroke_fill=(255, 255, 255, 1),
+    )
+    if state.extra_msg:
+        bonus_icon_file = os.path.join(srcpath, 'extra_bonus.png')
+        if os.path.exists(bonus_icon_file):
+            bonus_icon = BuildImage(0, 0, background=bonus_icon_file)
+            background.paste(bonus_icon, (551, 7), True)
+    total_icon_file = os.path.join(srcpath, 'text_block_new.png')
+    if os.path.exists(total_icon_file):
+        total_background = BuildImage(0, 0, background=total_icon_file)
+        background.paste(total_background, (553, 255), True)
+    background.text(
+        (618, 338),
+        state.total_get_msg,
+        (77, 83, 149),
+        stroke_width=2,
+        stroke_fill=(255, 255, 255, 1),
+    )
 
 
 async def as_login_v3(uid: int, username: str, qqname: str, nick_flag: int, avatar_url: str = ''):
     """
     生成签到卡片
-    
+
     Args:
         uid: 用户 UID
         username: 用户昵称
@@ -182,302 +647,45 @@ async def as_login_v3(uid: int, username: str, qqname: str, nick_flag: int, avat
         Base64 编码的图片 CQ 码
     """
     srcpath = get_src_path()
-    
-    # 初始化
-    festival_msg = ''
-    birthday_msg = ''
-    extra_msg = ''
-    luckygold_msg = ''
-    total_get_msg = ''
-    
-    current_time = time.localtime(time.time())
-    days = int(time.strftime("%d", current_time))
-    months = int(time.strftime("%m", current_time))
-    week = int(time.strftime("%w", current_time))
-    
-    wallet = money.of(uid)
-    last_login = wallet.last_login
-    gold = 100
-    login_flag = 1 if int(f'{months}0{days}') == last_login else 0
-    
-    # 节日和生日检查
-    flag_day = str(days) if days > 9 else f'0{days}'
-    flag_month = str(months) if months > 9 else f'0{months}'
-    flag = flag_month + flag_day
-    
-    birth_flag = 0
-    event_flag = 0
-    
-    for i, birth in enumerate(birth_list):
-        if flag == birth:
-            birth_flag = 1
-            birthday_msg = f'{member_list[i]}的生日'
-            if login_flag == 0:
-                extra_msg += f'☆ 星星+2400(生日)\n☆ 金币+5000(生日)\n'
-            break
-    
-    for i, event in enumerate(event_list):
-        if flag == event:
-            event_flag = 1
-            festival_msg = f'{event_name_list[i]}'
-            if login_flag == 0:
-                extra_msg += f'☆ 星星+1600(节日)\n☆ 金币+3600(节日)\n'
-            break
-    
-    if not login_flag:
-        wallet.logindays += 1
-    
-    # 人品值
-    h = wallet.rp if login_flag else _hash()
-    rp = h % 101
-    info = feed_back(rp)
-    
-    # 宜忌
-    good_todo_index = wallet.goodluck if login_flag else luck_choice(0)
-    bad_todo_index = wallet.badluck if login_flag else luck_choice(1)
-    if good_todo_index == bad_todo_index:
-        bad_todo_index = (bad_todo_index + 1) % len(badluck)
-    good_luck_msg = goodluck[good_todo_index % len(goodluck)]
-    bad_luck_msg = badluck[bad_todo_index % len(badluck)]
-    
-    # 幸运币
-    if 90 <= rp <= 99 and not login_flag:
-        luckygold_num = max(1, min(5, rp - 90))
-        extra_msg += f'☆ 幸运币+{luckygold_num} (人品)\n'
-        luckygold_msg += f'☆ 幸运币+{luckygold_num}\n'
-        wallet.luckygold += luckygold_num
-    elif rp == 100 and not login_flag:
-        luckygold_num = 10
-        extra_msg += f'☆ 幸运币+{luckygold_num} (人品)\n'
-        luckygold_msg += f'☆ 幸运币+{luckygold_num}\n'
-        wallet.luckygold += luckygold_num
-    elif rp > 100 and not login_flag:
-        luckygold_num = 20
-        extra_msg += f'☆ 幸运币+{luckygold_num} (人品)\n'
-        luckygold_msg += f'☆ 幸运币+{luckygold_num}\n'
-        wallet.luckygold += luckygold_num
-    
-    gold += rp
-    logindays = wallet.logindays
-    star_add = min(random.randint(100 + logindays // 5 * 25, 200 + logindays // 5 * 50), 5000)
-    gold_add = min(random.randint(50 + logindays // 2 * 5, 100 + logindays // 1 * 5), 2500)
-    
-    date_msg = f'{months}月{days}日星期{week_list[week]}   已签到{logindays}天'
-    
-    # 签到奖励
-    if login_flag == 0:
-        num = rp * 5 + birth_flag * 2400 + event_flag * 1600 + star_add
-        gold += birth_flag * 5000 + event_flag * 3600 + gold_add
-        wallet.starstone += num
-        wallet.gold += gold
-        wallet.last_login = int(f'{months}0{days}')
-        wallet.rp = h
-        wallet.goodluck = good_todo_index
-        wallet.badluck = bad_todo_index
-        
-        total_get_msg = f'☆ 星星+{num}\n☆ 金币+{gold}\n{luckygold_msg}'
-        if logindays >= 10:
-            extra_msg += f'☆ 星星+{star_add} (累签)\n☆ 金币+{gold_add} (累签)\n'
-    
-    # 匿名用户特殊处理
-    if uid == 80000000:
-        rp = -1
-        info = '  Vanitas vanitatum,Et omnia vanitas.'
-        good_luck_msg = '宜 取消匿名'
-        bad_luck_msg = '忌 匿名'
-        date_msg = f'{months}月{days}日星期{week_list[week]}'
-        total_get_msg = f'△ 无'
-        extra_msg = ''
-        login_flag = 0
-    
-    # ====== 开始绘图 ======
-    # 背景：优先查找 customize/{uid}.png，否则从 background/ 随机选取
-    border = 0
-    is_bold = False
+    state = _build_login_card_state(
+        uid,
+        money.of(uid),
+        time.localtime(time.time()),
+    )
+    background, border, has_custom_bg = _build_login_background(srcpath, uid)
+    default_avatar = await _paste_user_avatar(
+        background,
+        srcpath,
+        uid,
+        avatar_url,
+        100,
+        (23, 23),
+    )
+    if default_avatar:
+        tip_text = BuildImage(
+            0,
+            0,
+            plain_text="当前为默认头像，可发送 上传头像[图片] 修改",
+            font_size=11,
+            font=BODY_FONT,
+            font_color=(77, 83, 149),
+            stroke_width=border,
+            stroke_fill=(255, 255, 255),
+        )
+        background.paste(tip_text, (10, 136), True)
 
-    custom_bg_path = os.path.join(srcpath, 'customize', f'{uid}.jpg')
-    has_custom_bg = os.path.exists(custom_bg_path)
-
-    if has_custom_bg:
-        border = 2
-        is_bold = True
-        imageFile = custom_bg_path
-        bg = BuildImage(0, 0, font_size=30, background=os.path.join(srcpath, 'whiteboard.jpg'), font='HYShiGuangTiW_0.ttf')
-        try:
-            cstm_bg = BuildImage(0, 0, font_size=30, background=imageFile, font='HYShiGuangTiW_0.ttf')
-            if cstm_bg.w > cstm_bg.h * 16 / 9:
-                cstm_bg.resize(ratio=540 / cstm_bg.h)
-            else:
-                cstm_bg.resize(ratio=960 / cstm_bg.w)
-            bg.paste(cstm_bg, (int(480 - cstm_bg.w / 2), int(270 - cstm_bg.h / 2)), True)
-        except:
-            pass
-        mask_path = os.path.join(srcpath, 'login_background_custom.png')
-        if os.path.exists(mask_path):
-            mask = BuildImage(0, 0, font_size=30, background=mask_path, font='HYShiGuangTiW_0.ttf')
-            bg.paste(mask, (0, 0), True)
-    else:
-        bg_list = _get_background_images(srcpath)
-        if uid == 80000000:
-            user_bg_choose = extra_bg_list[0]
-        else:
-            user_bg_choose = random.choice(bg_list) if bg_list else extra_bg_list[0]
-        imageFile = os.path.join(srcpath, 'background', user_bg_choose)
-        if not os.path.exists(imageFile):
-            imageFile = os.path.join(srcpath, 'background', bg_list[0]) if bg_list else None
-        bg = BuildImage(0, 0, font_size=30, background=imageFile, font='HYShiGuangTiW_0.ttf')
-    
-    # 头像
-    icon_pasted = False
-    is_default_avatar = False
-    
-    # 优先检查是否存在自定义上传的头像
-    custom_avatar_path = os.path.join(srcpath, 'avatar', f'{uid}.png')
-    if os.path.exists(custom_avatar_path):
-        try:
-            icon = BuildImage(0, 0, background=custom_avatar_path)
-            w, h = icon.size
-            icon.resize(ratio=100 / w)
-            icon.circle()
-            bg.paste(icon, (23, 23), True)
-            icon_pasted = True
-        except Exception:
-            pass
-
-    if not icon_pasted and avatar_url:
-        try:
-            profile_img = await fetch_avatar(avatar_url)
-            if profile_img:
-                iconFile = io.BytesIO(profile_img)
-                icon = BuildImage(0, 0, background=iconFile)
-                w, h = icon.size
-                icon.resize(ratio=100 / w)
-                icon.circle()
-                bg.paste(icon, (23, 23), True)
-                icon_pasted = True
-        except Exception as e:
-            pass  # 头像加载失败，跳过
-
-    if not icon_pasted:
-        default_icon_path = os.path.join(srcpath, 'default_avatar.jpg')
-        if os.path.exists(default_icon_path):
-            try:
-                icon = BuildImage(0, 0, background=default_icon_path)
-                w, h = icon.size
-                icon.resize(ratio=100 / w)
-                icon.circle()
-                bg.paste(icon, (23, 23), True)
-                is_default_avatar = True
-            except Exception:
-                pass
-                
-    if is_default_avatar:
-        tip_text = BuildImage(0, 0, plain_text="当前为默认头像，可发送 上传头像[图片] 修改", font_size=11, font='yz.ttf',
-                                 font_color=(77, 83, 149), stroke_width=border, stroke_fill=(255, 255, 255))
-        tip_w, tip_h = tip_text.size
-        # 头像坐标是 (23, 23), 大小 100x100, 中心x为 73
-        bg.paste(tip_text, (10, 136), True)
-    
-    # 日期+累计签到（上移至y=473以腾出UID显示空间）
-    date_text = BuildImage(0, 0, plain_text=date_msg, font_size=30, font='nyan.ttf',
-                           font_color=(77, 83, 149), stroke_width=border, stroke_fill=(255, 255, 255))
-    bg.paste(date_text, (23, 473), True)
-    
-    # 左下角显示UID
-    uid_text = BuildImage(0, 0, plain_text=f'UID：{uid}', font_size=18, font='yz.ttf',
-                          font_color=(77, 83, 149), stroke_width=border, stroke_fill=(255, 255, 255))
-    bg.paste(uid_text, (23, 510), True)
-    
-    # 用户名
-    size = check_str_len(qqname)
-    if size >= 20:
-        final_txt = ''
-        for i in qqname:
-            final_txt += i
-            if check_str_len(final_txt) >= 20:
-                break
-    else:
-        final_txt = qqname
-    
-    name_text = BuildImage(0, 0, plain_text=final_txt, font_size=30, font='yz.ttf',
-                           font_color=(77, 83, 149), stroke_width=border, stroke_fill=(255, 255, 255))
-    
-    nick_msg = f"欢迎回来，{username}~" if nick_flag else "欢迎回来~"
-    if uid == 80000000:
-        nick_msg = "......"
-    
-    nick_text = BuildImage(0, 0, plain_text=nick_msg, font_size=25, font='yz.ttf',
-                           font_color=(77, 83, 149), stroke_width=border, stroke_fill=(255, 255, 255))
-    bg.paste(name_text, (190, 30), True)
-    bg.paste(nick_text, (190, 75), True)
-    
-    # 节日提醒
-    if festival_msg and birthday_msg:
-        jieri_msg = f'今天是{festival_msg}和{birthday_msg}~'
-    elif festival_msg:
-        jieri_msg = f'今天是{festival_msg}~'
-    elif birthday_msg:
-        jieri_msg = f'今天是{birthday_msg}~'
-    else:
-        jieri_msg = ''
-    
-    if jieri_msg:
-        jieri_image = BuildImage(0, 0, plain_text=jieri_msg, font_size=30, font='HYShiGuangTiW_0.ttf',
-                                 font_color=(77, 83, 149), stroke_width=border, stroke_fill=(255, 255, 255))
-        w, h = jieri_image.size
-        bg.paste(jieri_image, (int(215 - w / 2), 157), True)
-    
-    # 运势
-    bg.text((49, 259), good_luck_msg, (77, 83, 149), stroke_width=border, stroke_fill=(255, 255, 255))
-    bg.text((261, 259), bad_luck_msg, (77, 83, 149), stroke_width=border, stroke_fill=(255, 255, 255))
-    
-    # 人品值
-    if rp < 0:
-        rp_colormap = (244, 93, 129)
-    elif rp == 0:
-        rp_colormap = (100, 100, 100)
-    elif rp <= 100:
-        rp_colormap = lab2rgb(86, 80 - rp * 1.6, 4)
-    else:
-        rp_colormap = (68, 118, 244)
-    
-    rp_number = BuildImage(0, 0, plain_text=str(rp), font_size=60, font='nyan.ttf',
-                           font_color=rp_colormap, stroke_width=border, stroke_fill=(255, 255, 255))
-    rp_w, rp_h = rp_number.size
-    bg.paste(rp_number, (int(215 - rp_w / 2), 356), True)
-    
-    infoImage = BuildImage(0, 0, plain_text=info, font_size=25, font='HYShiGuangTiW_0.ttf',
-                           font_color=rp_colormap, stroke_width=border, stroke_fill=(255, 255, 255))
-    info_w, info_h = infoImage.size
-    bg.paste(infoImage, (int(215 - info_w / 2), 424), True)
-    
-    # 额外奖励 & 总计获得
-    if not login_flag:
-        bg.text((590, 70), extra_msg, (77, 83, 149), stroke_width=2, stroke_fill=(255, 255, 255, 1))
-        if extra_msg:
-            bonusIconFile = os.path.join(srcpath, 'extra_bonus.png')
-            if os.path.exists(bonusIconFile):
-                bonus_icon = BuildImage(0, 0, background=bonusIconFile)
-                bg.paste(bonus_icon, (551, 7), True)
-        
-        totalIconFile = os.path.join(srcpath, 'text_block_new.png')
-        if os.path.exists(totalIconFile):
-            total_bg = BuildImage(0, 0, background=totalIconFile)
-            bg.paste(total_bg, (553, 255), True)
-        bg.text((618, 338), total_get_msg, (77, 83, 149), stroke_width=2, stroke_fill=(255, 255, 255, 1))
-    else:
-        # 已签到标记
-        if has_custom_bg:
-            loginFlagIconFile = os.path.join(srcpath, 'login_flag_custom.png')
-        else:
-            loginFlagIconFile = os.path.join(srcpath, 'login_flag.png')
-
-        if os.path.exists(loginFlagIconFile):
-            login_flag_img = BuildImage(0, 0, background=loginFlagIconFile)
-            bg.paste(login_flag_img, (373, 174), True)
-    
-    # 返回图片
-    return save_to_local(bg, "login")
+    _draw_login_identity(
+        background,
+        uid,
+        username,
+        qqname,
+        nick_flag,
+        state,
+        border,
+    )
+    _draw_login_fortune(background, state, border)
+    _draw_login_rewards(background, srcpath, state, has_custom_bg)
+    return save_to_local(background)
 
 
 def get_user_gold_rank_str(current_user_id: int) -> str:
@@ -509,179 +717,236 @@ def get_user_gold_rank_str(current_user_id: int) -> str:
         return f"(位于前{percentage:.0f}%)"
 
 
-async def get_purse(uid: int, user_name: str, guild_flag: int = 0, avatar_url: str = ''):
+def _star_purse_backgrounds(starstone: int) -> list[str]:
+    backgrounds = []
+    if starstone > 15000:
+        backgrounds.append('purse_04.jpg')
+    if 25000 < starstone < 100000 and random.randint(1, 101) >= 50:
+        backgrounds.append('purse_10.jpg')
+    if starstone >= 100000:
+        backgrounds.append('purse_14.jpg')
+    if starstone < 4000:
+        backgrounds.append('purse_13.jpg')
+    return backgrounds
+
+
+def _gold_purse_backgrounds(gold: int) -> list[str]:
+    backgrounds = []
+    if gold >= 40000:
+        backgrounds.append('purse_22.jpg')
+    elif gold >= 30000:
+        backgrounds.append('purse_21.jpg')
+    elif gold >= 20000:
+        backgrounds.append('purse_20.jpg')
+    elif gold >= 10000:
+        backgrounds.append('purse_15.jpg')
+    if 1000 < gold < 10000 and random.randint(1, 101) >= 50:
+        backgrounds.append('purse_06.jpg')
+    if gold < 75:
+        backgrounds.append('purse_07.jpg')
+    return backgrounds
+
+
+def _lucky_purse_backgrounds(lucky_gold: int) -> list[str]:
+    backgrounds = []
+    if 20 < lucky_gold < 100 and random.randint(1, 101) >= 50:
+        backgrounds.append('purse_08.jpg')
+    if lucky_gold >= 100:
+        backgrounds.append('purse_19.jpg')
+    return backgrounds
+
+
+def _random_purse_background(bonus_point: int) -> str | None:
+    if bonus_point > 95:
+        return 'purse_16.jpg'
+    if bonus_point < 6 or 47 < bonus_point < 53:
+        return 'purse_17.jpg'
+    return None
+
+
+def _purse_background_choices(
+    starstone: int,
+    gold: int,
+    lucky_gold: int,
+    hour: int,
+) -> list[str]:
+    choices = PURSE_NORMAL_BACKGROUNDS[:]
+    if gold > 300:
+        choices.append('purse_03.jpg')
+    choices.extend(_star_purse_backgrounds(starstone))
+    choices.extend(_gold_purse_backgrounds(gold))
+    choices.extend(_lucky_purse_backgrounds(lucky_gold))
+    random_background = _random_purse_background(random.randint(1, 101))
+    if random_background:
+        choices.append(random_background)
+    if 1 < hour < 5:
+        choices.append('purse_12.jpg')
+    return choices
+
+
+def _purse_display_values(uid: int, wallet):
+    if uid == 80000000:
+        return (
+            'purse_anony.jpg',
+            (255, 255, 255),
+            '???',
+            '???',
+            '???',
+            '???',
+        )
+    choices = _purse_background_choices(
+        wallet.starstone,
+        wallet.gold,
+        wallet.luckygold,
+        datetime.now().hour,
+    )
+    return (
+        random.choice(choices),
+        (116, 88, 86),
+        wallet.starstone,
+        wallet.gold,
+        wallet.luckygold,
+        wallet.kirastone,
+    )
+
+
+def _draw_purse_details(
+    background: BuildImage,
+    uid: int,
+    user_name: str,
+    font_color,
+    starstone,
+    gold,
+    lucky_gold,
+    kirastone,
+):
+    display_name = user_name[:9] + '...' if len(user_name) >= 10 else user_name
+    name_text = BuildImage(
+        0,
+        0,
+        plain_text=f'{display_name}的钱包',
+        font_size=35,
+        font=BODY_FONT,
+        font_color=font_color,
+    )
+    background.paste(img=name_text, pos=(122, 25), alpha=True)
+
+    star_text = BuildImage(
+        0,
+        0,
+        plain_text=f'星星 {starstone}颗',
+        font_size=30,
+        font=BODY_FONT,
+        font_color=font_color,
+    )
+    background.paste(img=star_text, pos=(160, 128), alpha=True)
+    gold_text = BuildImage(
+        0,
+        0,
+        plain_text=f'金币 {gold}枚',
+        font_size=30,
+        font=BODY_FONT,
+        font_color=font_color,
+    )
+    background.paste(img=gold_text, pos=(280, 187), alpha=True)
+
+    rank = get_user_gold_rank_str(uid)
+    if rank:
+        rank_text = BuildImage(
+            0,
+            0,
+            plain_text=rank,
+            font_size=13,
+            font=BODY_FONT,
+            font_color=font_color,
+        )
+        background.paste(
+            img=rank_text,
+            pos=(350, 190 + gold_text.h),
+            alpha=True,
+        )
+
+    lucky_text = BuildImage(
+        0,
+        0,
+        plain_text=f'幸运币 {lucky_gold}枚',
+        font_size=30,
+        font=BODY_FONT,
+        font_color=font_color,
+    )
+    background.paste(img=lucky_text, pos=(100, 245), alpha=True)
+    kirastone_text = BuildImage(
+        0,
+        0,
+        plain_text=f'宝石 {kirastone}颗',
+        font_size=30,
+        font=BODY_FONT,
+        font_color=font_color,
+    )
+    background.paste(img=kirastone_text, pos=(420, 78), alpha=True)
+    uid_text = BuildImage(
+        0,
+        0,
+        plain_text=f'UID：{uid}',
+        font_size=16,
+        font=BODY_FONT,
+        font_color=font_color,
+    )
+    background.paste(img=uid_text, pos=(20, 290), alpha=True)
+
+
+async def get_purse(uid: int, user_name: str, avatar_url: str = ''):
     """
     生成钱包图片
     
     Args:
         uid: 用户 UID
         user_name: 用户名
-        guild_flag: 是否为频道用户
         avatar_url: 用户头像 URL
     
     Returns:
         Base64 编码的图片 CQ 码
     """
     srcpath = get_src_path()
-    
-    normal_bg_list = ['purse_01.jpg', 'purse_02.jpg', 'purse_05.jpg', 'purse_09.jpg']
-    normal_coin_bg = 'purse_03.jpg'
-    normal_star_bg = 'purse_04.jpg'
-    many_coin_bonus = 'purse_06.jpg'
-    no_coin_bouns = 'purse_07.jpg'
-    coin_1w_bonus = 'purse_15.jpg'
-    coin_2w_bonus = 'purse_20.jpg'
-    coin_3w_bonus = 'purse_21.jpg'
-    coin_4w_bonus = 'purse_22.jpg'
-    many_lucky_bonus = 'purse_08.jpg'
-    lucky_100_bonus = 'purse_19.jpg'
-    many_star_bouns = 'purse_10.jpg'
-    no_star_bonus = 'purse_13.jpg'
-    star_10w_bonus = 'purse_14.jpg'
-    night_limit_bonus = 'purse_12.jpg'
-    heart_bonus = 'purse_16.jpg'
-    fish_nonus = 'purse_17.jpg'
-    
-    font_color = (116, 88, 86)
-    
     wallet = money.of(uid)
-    user_starstone = wallet.starstone
-    user_gold = wallet.gold
-    user_lucky = wallet.luckygold
-    user_kirastone = wallet.kirastone
-    
-    choose_list = normal_bg_list[:]
-    
-    # 根据资产解锁背景
-    if user_gold > 300:
-        choose_list.append(normal_coin_bg)
-    if user_starstone > 15000:
-        choose_list.append(normal_star_bg)
-    if 25000 < user_starstone < 100000 and random.randint(1, 101) >= 50:
-        choose_list.append(many_star_bouns)
-    if user_starstone >= 100000:
-        choose_list.append(star_10w_bonus)
-    if user_starstone < 4000:
-        choose_list.append(no_star_bonus)
-    if user_gold >= 40000:
-        choose_list.append(coin_4w_bonus)
-    elif user_gold >= 30000:
-        choose_list.append(coin_3w_bonus)
-    elif user_gold >= 20000:
-        choose_list.append(coin_2w_bonus)
-    elif user_gold >= 10000:
-        choose_list.append(coin_1w_bonus)
-    if 1000 < user_gold < 10000 and random.randint(1, 101) >= 50:
-        choose_list.append(many_coin_bonus)
-    if user_gold < 75:
-        choose_list.append(no_coin_bouns)
-    if 20 < user_lucky < 100 and random.randint(1, 101) >= 50:
-        choose_list.append(many_lucky_bonus)
-    if user_lucky >= 100:
-        choose_list.append(lucky_100_bonus)
-    
-    bonus_point = random.randint(1, 101)
-    if bonus_point > 95:
-        choose_list.append(heart_bonus)
-    elif bonus_point < 6:
-        choose_list.append(fish_nonus)
-    elif 47 < bonus_point < 53:
-        choose_list.append(fish_nonus)
-    
-    now = datetime.now()
-    hour = int(now.strftime('%H'))
-    if 1 < hour < 5:
-        choose_list.append(night_limit_bonus)
-    
-    purse_choose = random.choice(choose_list)
-    
-    if uid == 80000000:
-        purse_choose = 'purse_anony.jpg'
-        font_color = (255, 255, 255)
-        user_starstone = '???'
-        user_gold = '???'
-        user_lucky = '???'
-        user_kirastone = '???'
-    
-    imageFile = os.path.join(srcpath, purse_choose)
-    if not os.path.exists(imageFile):
-        imageFile = os.path.join(srcpath, normal_bg_list[0])
-    
-    bg = BuildImage(0, 0, font_size=30, background=imageFile, font='yz.ttf')
-    
-    # 头像
-    icon_pasted = False
-    
-    # 优先检查是否存在自定义上传的头像
-    custom_avatar_path = os.path.join(srcpath, 'avatar', f'{uid}.png')
-    if os.path.exists(custom_avatar_path):
-        try:
-            icon = BuildImage(0, 0, background=custom_avatar_path)
-            w, h = icon.size
-            icon.resize(ratio=80 / w)
-            icon.circle()
-            bg.paste(icon, (20, 18), True)
-            icon_pasted = True
-        except Exception:
-            pass
+    (
+        background_name,
+        font_color,
+        starstone,
+        gold,
+        lucky_gold,
+        kirastone,
+    ) = _purse_display_values(uid, wallet)
+    image_file = os.path.join(srcpath, background_name)
+    if not os.path.exists(image_file):
+        image_file = os.path.join(srcpath, PURSE_NORMAL_BACKGROUNDS[0])
 
-    if not icon_pasted and avatar_url:
-        try:
-            profile_img = await fetch_avatar(avatar_url)
-            if profile_img:
-                iconFile = io.BytesIO(profile_img)
-                icon = BuildImage(0, 0, background=iconFile)
-                w, h = icon.size
-                icon.resize(ratio=80 / w)
-                icon.circle()
-                bg.paste(icon, (20, 18), True)
-                icon_pasted = True
-        except Exception as e:
-            pass  # 头像加载失败，跳过
-
-    if not icon_pasted:
-        default_icon_path = os.path.join(srcpath, 'default_avatar.jpg')
-        if os.path.exists(default_icon_path):
-            try:
-                icon = BuildImage(0, 0, background=default_icon_path)
-                w, h = icon.size
-                icon.resize(ratio=80 / w)
-                icon.circle()
-                bg.paste(icon, (20, 18), True)
-            except Exception:
-                pass
-    
-    # 昵称
-    display_name = user_name[:9] + '...' if len(user_name) >= 10 else user_name
-    name_text = BuildImage(0, 0, plain_text=f'{display_name}的钱包', font_size=35, font='yz.ttf', font_color=font_color)
-    bg.paste(img=name_text, pos=(122, 25), alpha=True)
-    
-    # 排名
-    rank_str = get_user_gold_rank_str(uid)
-    
-    # 资产信息
-    star_text = BuildImage(0, 0, plain_text=f'星星 {user_starstone}颗', font_size=30, font='yz.ttf', font_color=font_color)
-    bg.paste(img=star_text, pos=(160, 128), alpha=True)
-    
-    gold_text = BuildImage(0, 0, plain_text=f'金币 {user_gold}枚', font_size=30, font='yz.ttf', font_color=font_color)
-    bg.paste(img=gold_text, pos=(280, 187), alpha=True)
-    
-    if rank_str:
-        rank_text = BuildImage(0, 0, plain_text=rank_str, font_size=13, font='yz.ttf', font_color=font_color)
-        bg.paste(img=rank_text, pos=(350, 190 + gold_text.h), alpha=True)
-    
-    lucky_text = BuildImage(0, 0, plain_text=f'幸运币 {user_lucky}枚', font_size=30, font='yz.ttf', font_color=font_color)
-    bg.paste(img=lucky_text, pos=(100, 245), alpha=True)
-    
-    kirastone_text = BuildImage(0, 0, plain_text=f'宝石 {user_kirastone}颗', font_size=30, font='yz.ttf', font_color=font_color)
-    bg.paste(img=kirastone_text, pos=(420, 78), alpha=True)
-    
-    # 左下角显示UID
-    uid_text = BuildImage(0, 0, plain_text=f'UID：{uid}', font_size=16, font='yz.ttf', font_color=font_color)
-    bg.paste(img=uid_text, pos=(20, 290), alpha=True)
-    
-    # 使用本地文件保存以避免 NTQQ 超时问题
-    return save_to_local(bg, "purse")
+    background = BuildImage(
+        0,
+        0,
+        font_size=30,
+        background=image_file,
+        font=BODY_FONT,
+    )
+    await _paste_user_avatar(
+        background,
+        srcpath,
+        uid,
+        avatar_url,
+        80,
+        (20, 18),
+    )
+    _draw_purse_details(
+        background,
+        uid,
+        user_name,
+        font_color,
+        starstone,
+        gold,
+        lucky_gold,
+        kirastone,
+    )
+    return save_to_local(background)
 
 
 async def dl_save_image(url: str, uid: int):
