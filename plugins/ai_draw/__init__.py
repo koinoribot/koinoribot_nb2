@@ -264,39 +264,56 @@ async def on_startup():
 
 # ═══════════════ 图片提取 ═══════════════
 
+def _extract_onebot_image_url(event: Event) -> str | None:
+    for segment in event.message:
+        if segment.type == "image":
+            return segment.data.get("url") or segment.data.get("file")
+    return None
+
+
+def _extract_qqbot_attachment_url(event: Event) -> str | None:
+    for attachment in getattr(event, "attachments", None) or ():
+        attachment_url = getattr(attachment, "url", None)
+        if attachment_url:
+            return attachment_url
+    return None
+
+
+def _extract_qqbot_message_image_url(event: Event) -> str | None:
+    for segment in event.message:
+        if segment.type in {"image", "attachment"}:
+            return segment.data.get("url")
+    return None
+
+
+def _extract_image_url(event: Event) -> str | None:
+    if is_onebot(event):
+        return _extract_onebot_image_url(event)
+    if is_qqbot(event):
+        return (
+            _extract_qqbot_attachment_url(event)
+            or _extract_qqbot_message_image_url(event)
+        )
+    return None
+
+
+async def _download_reference_image(image_url: str) -> bytes:
+    async with aiohttp.ClientSession() as session:
+        async with session.get(image_url, timeout=30) as response:
+            if response.status != 200:
+                logger.error(
+                    f"下载参考图失败: HTTP {response.status}, url={image_url[:80]}"
+                )
+                raise RuntimeError(f"下载参考图失败: {response.status}")
+            return await response.read()
+
+
 async def extract_image(event: Event) -> bytes | None:
     """从消息中提取第一张图片并下载，返回 bytes；无图片则返回 None"""
-    image_url = None
-
-    if is_onebot(event):
-        for seg in event.message:
-            if seg.type == "image":
-                image_url = seg.data.get("url") or seg.data.get("file")
-                break
-    elif is_qqbot(event):
-        if hasattr(event, "attachments") and event.attachments:
-            for attachment in event.attachments:
-                if hasattr(attachment, "content_type") and "image" in str(attachment.content_type).lower():
-                    image_url = attachment.url
-                    break
-                if hasattr(attachment, "url") and attachment.url:
-                    image_url = attachment.url
-                    break
-        if not image_url:
-            for seg in event.message:
-                if seg.type == "image" or seg.type == "attachment":
-                    image_url = seg.data.get("url")
-                    break
-
+    image_url = _extract_image_url(event)
     if not image_url:
         return None
-
-    async with aiohttp.ClientSession() as session:
-        async with session.get(image_url, timeout=30) as resp:
-            if resp.status != 200:
-                logger.error(f"下载参考图失败: HTTP {resp.status}, url={image_url[:80]}")
-                raise RuntimeError(f"下载参考图失败: {resp.status}")
-            return await resp.read()
+    return await _download_reference_image(image_url)
 
 
 # ═══════════════ DeepSeek 翻译 ═══════════════

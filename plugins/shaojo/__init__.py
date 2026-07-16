@@ -67,7 +67,7 @@ my_shaojo_image_cmd = on_fullmatch(IMAGE_CMD_TEXT, priority=5, block=True)
 my_shaojo_image_high_cmd = on_fullmatch(IMAGE_HIGH_CMD_TEXT, priority=5, block=True)
 
 
-async def _is_other_shaojo(event: Event) -> bool:
+def _is_other_shaojo(event: Event) -> bool:
     text = event.get_plaintext().strip()
     return text.startswith(OTHER_TRIGGERS) or text.endswith(OTHER_TRIGGERS)
 
@@ -85,42 +85,63 @@ async def _sender_name(event: Event, uid: int) -> str:
     return await get_sender_nickname(event) or "你"
 
 
-def _extract_at_targets(event: Event) -> list[tuple[int, str, str]]:
-    targets: list[tuple[int, str, str]] = []
+def _target_from_segment(segment) -> tuple[int, str, str] | None:
+    segment_type = getattr(segment, "type", "")
+    data = getattr(segment, "data", {})
+    if segment_type == "at":
+        external_id = str(data.get("qq", ""))
+        if external_id and external_id != "all":
+            return (
+                get_unified_uid("onebot", external_id),
+                external_id,
+                "onebot",
+            )
+    if segment_type == "mention_user":
+        external_id = str(
+            data.get("user_id")
+            or data.get("id")
+            or data.get("user_openid")
+            or ""
+        )
+        if external_id:
+            return (
+                get_unified_uid("qqbot", external_id),
+                external_id,
+                "qqbot",
+            )
+    return None
 
+
+def _message_segment_targets(event: Event) -> list[tuple[int, str, str]]:
+    targets = []
     try:
         for segment in event.get_message():
-            segment_type = getattr(segment, "type", "")
-            data = getattr(segment, "data", {})
-
-            if segment_type == "at":
-                qq = str(data.get("qq", ""))
-                if qq and qq != "all":
-                    targets.append((get_unified_uid("onebot", qq), qq, "onebot"))
-            elif segment_type == "mention_user":
-                user_id = str(
-                    data.get("user_id")
-                    or data.get("id")
-                    or data.get("user_openid")
-                    or ""
-                )
-                if user_id:
-                    targets.append((get_unified_uid("qqbot", user_id), user_id, "qqbot"))
+            target = _target_from_segment(segment)
+            if target:
+                targets.append(target)
     except Exception as exc:
         logger.debug(f"解析 at 消息段失败: {exc}")
+    return targets
 
-    raw_message = str(getattr(event, "raw_message", ""))
-    for matched in _cq_at_re.findall(raw_message):
-        targets.append((get_unified_uid("onebot", matched), matched, "onebot"))
 
+def _dedupe_targets(
+    targets: list[tuple[int, str, str]],
+) -> list[tuple[int, str, str]]:
     deduped = []
     seen_uids = set()
     for target in targets:
-        target_uid = target[0]
-        if target_uid not in seen_uids:
+        if target[0] not in seen_uids:
             deduped.append(target)
-            seen_uids.add(target_uid)
+            seen_uids.add(target[0])
     return deduped
+
+
+def _extract_at_targets(event: Event) -> list[tuple[int, str, str]]:
+    targets = _message_segment_targets(event)
+    raw_message = str(getattr(event, "raw_message", ""))
+    for matched in _cq_at_re.findall(raw_message):
+        targets.append((get_unified_uid("onebot", matched), matched, "onebot"))
+    return _dedupe_targets(targets)
 
 
 async def _target_name(bot: Bot, event: Event, target_uid: int, target_external_id: str,) -> str:

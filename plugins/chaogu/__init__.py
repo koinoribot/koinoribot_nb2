@@ -173,9 +173,59 @@ async def handle_stock_list(event: Event, bot: Bot):
 
 stock_trend_cmd = on_regex(r'^(.+股)走势$', priority=5, block=True)
 
+
+async def _generate_stock_chart(
+    stock_name: str,
+    history: list,
+    stock_data: dict,
+):
+    logger.info("股票走势: 开始生成图表")
+    loop = asyncio.get_running_loop()
+    try:
+        return await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                generate_stock_chart,
+                stock_name,
+                history,
+                stock_data,
+            ),
+            timeout=10.0,
+        )
+    except asyncio.TimeoutError:
+        logger.error("股票走势: 图表生成超时 (10s)")
+    except Exception as exc:
+        logger.error(f"股票走势: 图表生成出错: {exc}")
+    return None
+
+
+def _stock_trend_text(
+    stock_name: str,
+    history: list,
+    initial_price: float,
+) -> str:
+    current_price = history[-1][1]
+    min_price = min(price for _, price in history)
+    max_price = max(price for _, price in history)
+    reference_price = history[0][1] if len(history) > 1 else initial_price
+    change = (current_price - reference_price) / reference_price * 100
+    symbol = "📈" if change >= 0 else "📉"
+    direction = "↑" if change >= 0 else "↓"
+    return f"""{symbol} 【{stock_name}】走势
+
+💰 当前价格: {current_price:.2f}金币
+📊 初始价格: {initial_price:.2f}金币
+📈 最高价格: {max_price:.2f}金币
+📉 最低价格: {min_price:.2f}金币
+{direction} 涨跌幅: {change:+.2f}%
+⏰ 数据点数: {len(history)}个
+
+（图表生成失败，显示文字版）"""
+
+
 @stock_trend_cmd.handle()
 async def handle_stock_trend(event: Event, bot: Bot, groups: tuple = RegexGroup()):
-    chart_buf = b64_str = None
+    chart_buf = None
     try:
         # 使用 RegexGroup 获取匹配到的股票名称
         if not groups or len(groups) < 1:
@@ -189,7 +239,7 @@ async def handle_stock_trend(event: Event, bot: Bot, groups: tuple = RegexGroup(
             await stock_trend_cmd.finish(f"未知股票: {stock_name}。可用的股票有: {', '.join(STOCKS.keys())}")
         
         stock_data = await get_stock_data()
-        logger.info(f"股票走势: 已获取股票数据")
+        logger.info("股票走势: 已获取股票数据")
         
         history = await get_stock_price_history(stock_name, stock_data)
         logger.info(f"股票走势: {stock_name} 历史记录条数={len(history) if history else 0}")
@@ -199,21 +249,7 @@ async def handle_stock_trend(event: Event, bot: Bot, groups: tuple = RegexGroup(
             await stock_trend_cmd.finish(f"{stock_name} 暂时还没有价格历史记录。初始价格为 {initial_price:.2f} 金币。")
         
         # 在线程池中生成图表
-        logger.info(f"股票走势: 开始生成图表")
-        loop = asyncio.get_running_loop()
-        try:
-            chart_buf = await asyncio.wait_for(
-                loop.run_in_executor(
-                    None, generate_stock_chart, stock_name, history, stock_data
-                ),
-                timeout=10.0
-            )
-        except asyncio.TimeoutError:
-            logger.error(f"股票走势: 图表生成超时 (10s)")
-            chart_buf = None
-        except Exception as e:
-            logger.error(f"股票走势: 图表生成出错: {e}")
-            chart_buf = None
+        chart_buf = await _generate_stock_chart(stock_name, history, stock_data)
         
         logger.info(f"股票走势: 图表生成完成，结果={chart_buf is not None}")
         
@@ -221,35 +257,12 @@ async def handle_stock_trend(event: Event, bot: Bot, groups: tuple = RegexGroup(
             # 转换为图片消息段并发送
             image_bytes = chart_buf.getvalue()
             img_msg = build_image_msg(event, image_bytes)
-            logger.info(f"股票走势: 发送图片")
+            logger.info("股票走势: 发送图片")
             await stock_trend_cmd.finish(img_msg)
-        else:
-            # 图表生成失败，发送文字版
-            current_price = history[-1][1]
-            initial_price = stock_data[stock_name]["initial_price"]
-            min_price = min(p for _, p in history)
-            max_price = max(p for _, p in history)
-            
-            if len(history) > 1:
-                first_price = history[0][1]
-                change = (current_price - first_price) / first_price * 100
-            else:
-                change = (current_price - initial_price) / initial_price * 100
-            
-            symbol = "📈" if change >= 0 else "📉"
-            
-            msg = f"""{symbol} 【{stock_name}】走势
-
-💰 当前价格: {current_price:.2f}金币
-📊 初始价格: {initial_price:.2f}金币
-📈 最高价格: {max_price:.2f}金币
-📉 最低价格: {min_price:.2f}金币
-{'↑' if change >= 0 else '↓'} 涨跌幅: {change:+.2f}%
-⏰ 数据点数: {len(history)}个
-
-（图表生成失败，显示文字版）"""
-            
-            await stock_trend_cmd.finish(msg)
+        initial_price = stock_data[stock_name]["initial_price"]
+        await stock_trend_cmd.finish(
+            _stock_trend_text(stock_name, history, initial_price)
+        )
     except FinishedException:
         raise
     except Exception as e:
@@ -260,7 +273,6 @@ async def handle_stock_trend(event: Event, bot: Bot, groups: tuple = RegexGroup(
     finally:
         if chart_buf:
             chart_buf.close()
-        del chart_buf, b64_str
         gc.collect()
 
 
@@ -429,41 +441,46 @@ async def handle_my_portfolio(event: Event, bot: Bot, uid: int = Depends(get_uid
 # ===== 市场动态 =====
 market_events_cmd = on_command("市场动态", priority=5, block=True)
 
+
+def _collect_market_events(stock_data: dict) -> list[dict]:
+    events = []
+    for stock_name, data in stock_data.items():
+        events.extend(
+            event | {"stock": stock_name}
+            for event in data.get("events", [])
+        )
+    return sorted(events, key=lambda event: event["time"], reverse=True)
+
+
+def _format_market_event(event: dict) -> str:
+    event_time = datetime.fromtimestamp(event["time"]).strftime("%m-%d %H:%M")
+    if event.get("scope") == "global":
+        return f"【{event_time}】{event['message']}\n  影响范围: 所有股票"
+
+    old_price = event.get("old_price")
+    new_price = event.get("new_price")
+    if not old_price or not new_price:
+        return f"【{event_time}】{event.get('message', '未知事件')}"
+
+    change_percent = (new_price - old_price) / old_price * 100
+    change_dir = "↑" if change_percent >= 0 else "↓"
+    return (
+        f"【{event_time}】{event['message']}\n"
+        f"  {event['stock']}价格: {old_price:.2f} → {new_price:.2f} "
+        f"({change_dir}{abs(change_percent):.1f}%)"
+    )
+
+
 @market_events_cmd.handle()
 async def handle_market_events(event: Event, bot: Bot):
     stock_data = await get_stock_data()
-    
-    # 收集所有事件
-    all_events = []
-    for stock_name, data in stock_data.items():
-        for evt in data.get("events", []):
-            evt["stock"] = stock_name
-            all_events.append(evt)
-    
-    all_events.sort(key=lambda x: x["time"], reverse=True)
-    
+    all_events = _collect_market_events(stock_data)
     if not all_events:
         await market_events_cmd.finish("近期没有重大市场事件发生。")
-    
-    recent_events = all_events[:5]
-    
-    lines = ["📢 最新市场动态:"]
-    for evt in recent_events:
-        event_time = datetime.fromtimestamp(evt["time"]).strftime('%m-%d %H:%M')
-        
-        if evt.get("scope") == "global":
-            lines.append(f"【{event_time}】{evt['message']}\n  影响范围: 所有股票")
-        else:
-            if evt.get("old_price") and evt.get("new_price"):
-                change_percent = (evt["new_price"] - evt["old_price"]) / evt["old_price"] * 100
-                change_dir = "↑" if change_percent >= 0 else "↓"
-                lines.append(
-                    f"【{event_time}】{evt['message']}\n"
-                    f"  {evt['stock']}价格: {evt['old_price']:.2f} → {evt['new_price']:.2f} "
-                    f"({change_dir}{abs(change_percent):.1f}%)"
-                )
-            else:
-                lines.append(f"【{event_time}】{evt.get('message', '未知事件')}")
+    lines = ["📢 最新市场动态:"] + [
+        _format_market_event(item)
+        for item in all_events[:5]
+    ]
     
     # 使用转发消息发送
     chain = await build_forward_chain(bot, ["\n\n".join(lines)])
@@ -471,6 +488,92 @@ async def handle_market_events(event: Event, bot: Bot):
 
 
 # ===== 股价更新定时任务 =====
+
+def _last_market_event_time(stock_data: dict) -> float:
+    try:
+        return max(
+            (
+                event["time"]
+                for stock in stock_data.values()
+                for event in stock.get("events", [])
+            ),
+            default=0,
+        )
+    except (KeyError, TypeError, ValueError):
+        return 0
+
+
+def _clamp_stock_price(price: float, initial_price: float) -> float:
+    return round(
+        max(initial_price * 0.01, min(price, initial_price * 2.00)),
+        2,
+    )
+
+
+def _apply_market_event(
+    stock_data: dict,
+    current_time: float,
+) -> set[str]:
+    can_trigger = (
+        current_time - _last_market_event_time(stock_data)
+    ) >= EVENT_COOLDOWN
+    if not can_trigger or random.random() >= EVENT_PROBABILITY:
+        return set()
+
+    event_type = random.choice(list(MARKET_EVENTS))
+    event_info = MARKET_EVENTS[event_type]
+    if event_info["scope"] == "single":
+        affected_stocks = {random.choice(list(STOCKS))}
+    else:
+        affected_stocks = set(STOCKS)
+
+    for stock_name in affected_stocks & stock_data.keys():
+        stock = stock_data[stock_name]
+        history = stock["history"]
+        current_price = history[-1][1] if history else stock["initial_price"]
+        new_price = _clamp_stock_price(
+            event_info["effect"](current_price),
+            stock["initial_price"],
+        )
+        event_message = random.choice(event_info["templates"]).format(
+            stock=stock_name
+        )
+        stock["events"].append(
+            {
+                "time": current_time,
+                "type": event_type,
+                "message": event_message,
+                "old_price": current_price,
+                "new_price": new_price,
+            }
+        )
+        stock["events"] = stock["events"][-10:]
+        history.append((current_time, new_price))
+    return affected_stocks
+
+
+def _update_regular_stock_price(
+    data: dict,
+    current_time: float,
+    cutoff_time: float,
+) -> None:
+    initial_price = data["initial_price"]
+    history = [
+        (timestamp, price)
+        for timestamp, price in data.get("history", [])
+        if timestamp >= cutoff_time
+    ]
+    current_price = history[-1][1] if history else initial_price
+    change_percent = random.uniform(-0.05, 0.05)
+    change_percent += 0.03 * (initial_price - current_price) / current_price
+    new_price = _clamp_stock_price(
+        current_price * (1 + change_percent),
+        initial_price,
+    )
+    history.append((current_time, new_price))
+    data["history"] = history
+
+
 async def hourly_price_update():
     """定时更新所有股票价格"""
     try:
@@ -478,92 +581,13 @@ async def hourly_price_update():
         stock_data = await get_stock_data()
         current_time = time.time()
         cutoff_time = current_time - HISTORY_DURATION_HOURS * 3600
-        
-        changed = False
-        event_triggered = False
-        affected_stocks = []
-        
-        # 获取最后事件时间
-        try:
-            last_event_time = max([
-                max([e["time"] for e in stock.get("events", [])], default=0)
-                for stock in stock_data.values()
-            ], default=0)
-        except:
-            last_event_time = 0
-        
-        can_trigger_event = (current_time - last_event_time) >= EVENT_COOLDOWN
-        
-        # 决定是否触发事件
-        if can_trigger_event and random.random() < EVENT_PROBABILITY:
-            event_type = random.choice(list(MARKET_EVENTS.keys()))
-            event_info = MARKET_EVENTS[event_type]
-            event_triggered = True
-            
-            if event_info["scope"] == "single":
-                affected_stocks = [random.choice(list(STOCKS.keys()))]
-            else:
-                affected_stocks = list(STOCKS.keys())
-            
-            # 应用事件影响
-            for stock_name in affected_stocks:
-                if stock_name not in stock_data:
-                    continue
-                
-                if stock_data[stock_name]["history"]:
-                    current_price = stock_data[stock_name]["history"][-1][1]
-                else:
-                    current_price = stock_data[stock_name]["initial_price"]
-                
-                new_price = event_info["effect"](current_price)
-                new_price = max(stock_data[stock_name]["initial_price"] * 0.01,
-                               min(new_price, stock_data[stock_name]["initial_price"] * 2.00))
-                new_price = round(new_price, 2)
-                
-                template = random.choice(event_info["templates"])
-                event_message = template.format(stock=stock_name)
-                
-                stock_data[stock_name]["events"].append({
-                    "time": current_time,
-                    "type": event_type,
-                    "message": event_message,
-                    "old_price": current_price,
-                    "new_price": new_price
-                })
-                stock_data[stock_name]["events"] = stock_data[stock_name]["events"][-10:]
-                stock_data[stock_name]["history"].append((current_time, new_price))
-                changed = True
-        
-        # 正常价格波动
+        affected_stocks = _apply_market_event(stock_data, current_time)
         for name, data in stock_data.items():
-            if event_triggered and name in affected_stocks:
+            if name in affected_stocks:
                 continue
-            
-            initial_price = data["initial_price"]
-            history = data.get("history", [])
-            
-            # 清理旧数据
-            history = [(ts, price) for ts, price in history if ts >= cutoff_time]
-            
-            if not history:
-                current_price = initial_price
-            else:
-                current_price = history[-1][1]
-            
-            # 随机波动
-            change_percent = random.uniform(-0.05, 0.05)
-            regression_factor = 0.03
-            change_percent += regression_factor * (initial_price - current_price) / current_price
-            
-            new_price = current_price * (1 + change_percent)
-            new_price = max(initial_price * 0.01, min(new_price, initial_price * 2.00))
-            new_price = round(new_price, 2)
-            
-            history.append((current_time, new_price))
-            stock_data[name]["history"] = history
-            changed = True
-        
-        if changed:
+            _update_regular_stock_price(data, current_time, cutoff_time)
+
+        if stock_data:
             await save_stock_data(stock_data)
             logger.info("Stock prices updated and saved.")
     except Exception as e:
@@ -626,7 +650,7 @@ def get_gamble_win_probability(gold: int, uid: int) -> float:
     return win
 
 
-async def perform_gamble_round(uid: int) -> dict:
+def perform_gamble_round(uid: int) -> dict:
     """执行一轮赌博并更新虚拟金币"""
     old_gold = gambling_sessions[uid]['gold']
     if old_gold is None or old_gold <= 0:
@@ -760,7 +784,7 @@ async def handle_confirm_gamble(event: Event, bot: Bot, uid: int = Depends(get_u
     
     await record_gamble_today(uid)
     
-    result = await perform_gamble_round(uid)
+    result = perform_gamble_round(uid)
     
     if not result["success"]:
         del gambling_sessions[uid]
@@ -781,7 +805,7 @@ async def handle_confirm_gamble(event: Event, bot: Bot, uid: int = Depends(get_u
         del gambling_sessions[uid]
         message = f"""\n第1轮结果:【{result['outcome']}】
 金币变化：{result['old_gold']} -> {result['new_gold']} (x{result['multiplier']})"""
-        message += f"\n\n本局失败，已强制离场。"
+        message += "\n\n本局失败，已强制离场。"
         message += record
         await gamble_confirm_cmd.finish(message, at_sender=True)
 
@@ -807,7 +831,7 @@ async def handle_continue_gamble(event: Event, bot: Bot, uid: int = Depends(get_
     next_round = current_round + 1
     gambling_sessions[uid]['round'] = next_round
     
-    result = await perform_gamble_round(uid)
+    result = perform_gamble_round(uid)
     
     if not result["success"]:
         del gambling_sessions[uid]
@@ -833,7 +857,7 @@ async def handle_continue_gamble(event: Event, bot: Bot, uid: int = Depends(get_
         final_gold = gambling_sessions[uid]['gold']
         record = await gold_change_record(uid, start_gold, final_gold)
         del gambling_sessions[uid]
-        message += f"\n\n本局失败，已强制离场。"
+        message += "\n\n本局失败，已强制离场。"
         message += record
     
     await gamble_continue_cmd.finish(message, at_sender=True)
@@ -986,14 +1010,14 @@ def draw_prize() -> str:
     return random.choices(TIERS, weights=WEIGHTS, k=1)[0]
 
 
-async def _give_wallet_gold_double(uid: int, special_prize: str) -> str:
+def _give_wallet_gold_double(uid: int, special_prize: str) -> str:
     wallet = money.of(uid)
     user_gold = wallet.gold
     wallet.gold += user_gold
     return special_prize
 
 
-async def _give_wallet_gold_deduct(uid: int, special_prize: str) -> str:
+def _give_wallet_gold_deduct(uid: int, special_prize: str) -> str:
     wallet = money.of(uid)
     user_gold = wallet.gold
     deduct = max(1, int(user_gold * 0.01))
@@ -1015,13 +1039,16 @@ async def _give_item_prize(uid: int, special_prize: str) -> str:
 SPECIAL_PRIZE_HANDLERS = {
     "钱包金币翻倍": _give_wallet_gold_double,
     "钱包金币-1%": _give_wallet_gold_deduct,
-    **{prize: _give_free_draw_prize for prize in FREE_DRAW_SPECIAL_PRIZES},
+    **dict.fromkeys(FREE_DRAW_SPECIAL_PRIZES, _give_free_draw_prize),
 }
 
 
 async def give_special_prize(uid: int, special_prize: str) -> str:
     handler = SPECIAL_PRIZE_HANDLERS.get(special_prize, _give_item_prize)
-    return await handler(uid, special_prize)
+    result = handler(uid, special_prize)
+    if asyncio.iscoroutine(result):
+        return await result
+    return result
 
 
 async def give_prize(uid: int, prize_tier: str) -> str:
@@ -1041,15 +1068,14 @@ async def give_prize(uid: int, prize_tier: str) -> str:
         return f"{prize_info['chinese']} *{prize_amount}"
 
 
-async def fish_count_prize(uid: int, prize_tier: str) -> Optional[int]:
+def fish_count_prize(uid: int, prize_tier: str) -> Optional[int]:
     """根据奖品档位计算额外钓鱼次数奖励"""
     prize_config = PRIZE_CONFIG[prize_tier]
     count = max(100, int(random.randint(5, 10) * prize_config['fish_add'] * 100))
     add_count = count * -1  # 负数表示增加钓鱼次数上限
     if FishingDB.check_and_update_fish_limit(uid, add_count):
         return count
-    else:
-        return None
+    return None
 
 
 turntable_cmd = on_command("幸运转盘", aliases={"幸运大转盘"}, priority=5, block=True)
@@ -1080,7 +1106,7 @@ async def handle_turntable(event: Event, bot: Bot, uid: int = Depends(get_uid)):
     # 抽取奖品
     prize_tier = draw_prize()
     prize_description = await give_prize(uid, prize_tier)
-    fish_count = await fish_count_prize(uid, prize_tier)
+    fish_count = fish_count_prize(uid, prize_tier)
     
     result_message = f"指针停在了【{prize_tier}】区域！"
     result_message += f"\n您获得了：{prize_description}"
@@ -1140,6 +1166,32 @@ async def handle_dibao(event: Event, bot: Bot, uid: int = Depends(get_uid)):
 # ===== 转账功能 (uid/qq/at 三种模式) =====
 TRANSFER_FEE_RATE = getattr(config, 'transfer_fee', 0.1)
 MIN_REST = getattr(config, 'min_rest', 1000)
+AMOUNT_NUMBER_ERROR = "金额必须是数字！"
+
+
+def _at_target_uid(args: Message) -> Optional[int]:
+    if not args:
+        return None
+    try:
+        return get_at_uid(args[0])
+    except ValueError:
+        return None
+
+
+def _at_transfer_amount(args: Message) -> int:
+    text = args.extract_plain_text().strip()
+    if text:
+        return int(text)
+    if len(args) > 1 and args[1].type == "text":
+        return int(args[1].data["text"].strip())
+    raise ValueError
+
+
+def _qq_transfer_parts(args: Message) -> Optional[tuple[str, int]]:
+    parts = args.extract_plain_text().strip().split()
+    if len(parts) < 2:
+        return None
+    return parts[0], int(parts[1])
 
 # 转账uid [目标uid] [金额]
 transfer_uid_cmd = on_command("转账uid", priority=5, block=True)
@@ -1178,7 +1230,7 @@ async def handle_transfer_qq(event: Event, bot: Bot, uid: int = Depends(get_uid)
     try:
         amount = int(parts[1])
     except ValueError:
-        await transfer_qq_cmd.finish("金额必须是数字！", at_sender=True)
+        await transfer_qq_cmd.finish(AMOUNT_NUMBER_ERROR, at_sender=True)
     
     # QQ号转UID（不自动创建）
     target_uid = uid_manager.get_uid_by_external_id("onebot", target_qq)
@@ -1192,48 +1244,36 @@ transfer_at_cmd = on_command("转账", priority=5, block=True)
 @transfer_at_cmd.handle()
 async def handle_transfer_at(uid: int = Depends(get_uid), args: Message = CommandArg()):
     """通过at转账"""
-    target_uid = None
-    try:
-        if len(args) > 0:
-            target_uid = get_at_uid(args[0])
-    except (ValueError, IndexError, Exception):
-        pass
+    target_uid = _at_target_uid(args)
     
     # 如果通过at找到了uid，通过at逻辑处理
     if target_uid is not None:
         try:
-            # 尝试提取金额，兼容旧逻辑但也支持 extract_plain_text
-            text = args.extract_plain_text().strip()
-            if not text:
-                 # 如果 extract_plain_text 为空（例如只发了 At），尝试检查 args[1]
-                 if len(args) > 1 and args[1].type == "text":
-                     amount = int(args[1].data["text"].strip())
-                 else:
-                     raise ValueError
-            else:
-                 amount = int(text)
+            amount = _at_transfer_amount(args)
         except (ValueError, IndexError):
-            await transfer_at_cmd.finish("金额必须是数字！", at_sender=True)
+            await transfer_at_cmd.finish(AMOUNT_NUMBER_ERROR, at_sender=True)
         
         await _do_transfer(transfer_at_cmd, uid, target_uid, amount)
         return
 
     # Fallback: 尝试 QQ 号逻辑
-    parts = args.extract_plain_text().strip().split()
-    if len(parts) >= 2:
-        target_qq = parts[0]
-        try:
-            amount = int(parts[1])
-        except ValueError:
-            await transfer_at_cmd.finish("金额必须是数字！", at_sender=True)
-        
-        target_uid = uid_manager.get_uid_by_external_id("onebot", target_qq)
-        if target_uid is None:
-            await transfer_at_cmd.finish(f"找不到at对应的账户，且找不到QQ号 {target_qq} 对应的账户", at_sender=True)
-            
-        await _do_transfer(transfer_at_cmd, uid, target_uid, amount)
-    else:
+    try:
+        transfer_parts = _qq_transfer_parts(args)
+    except ValueError:
+        await transfer_at_cmd.finish(AMOUNT_NUMBER_ERROR, at_sender=True)
+        return
+    if transfer_parts is None:
         await transfer_at_cmd.finish("格式：转账 [at/QQ] [金额]", at_sender=True)
+        return
+
+    target_qq, amount = transfer_parts
+    target_uid = uid_manager.get_uid_by_external_id("onebot", target_qq)
+    if target_uid is None:
+        await transfer_at_cmd.finish(
+            f"找不到at对应的账户，且找不到QQ号 {target_qq} 对应的账户",
+            at_sender=True,
+        )
+    await _do_transfer(transfer_at_cmd, uid, target_uid, amount)
 
 async def _do_transfer(cmd, sender_uid: int, target_uid: int, amount: int):
     """执行转账逻辑"""
@@ -1333,7 +1373,7 @@ async def handle_admin_add_qq(event: Event, bot: Bot, uid: int = Depends(get_uid
     try:
         amount = int(parts[1])
     except ValueError:
-        await admin_add_qq_cmd.finish("金额必须是数字！", at_sender=True)
+        await admin_add_qq_cmd.finish(AMOUNT_NUMBER_ERROR, at_sender=True)
     
     # QQ号转UID
     target_uid = uid_manager.get_uid_by_external_id("onebot", target_qq)
@@ -1406,7 +1446,7 @@ async def handle_admin_reduce_qq(event: Event, bot: Bot, uid: int = Depends(get_
     try:
         amount = int(parts[1])
     except ValueError:
-        await admin_reduce_qq_cmd.finish("金额必须是数字！", at_sender=True)
+        await admin_reduce_qq_cmd.finish(AMOUNT_NUMBER_ERROR, at_sender=True)
 
     if amount <= 0:
         await admin_reduce_qq_cmd.finish("金额必须是正整数！", at_sender=True)

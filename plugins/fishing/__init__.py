@@ -686,9 +686,9 @@ async def handle_pick_bottle(bot: Bot, event: Event, uid: int = Depends(get_uid)
         thrower_name = thrower_uid
 
     bottle_msg = f"🍾 漂流瓶 #{bottle_id}\n"
-    bottle_msg += f"━━━━━━━━━━\n"
+    bottle_msg += "━━━━━━━━━━\n"
     bottle_msg += f"{bottle['content']}\n"
-    bottle_msg += f"━━━━━━━━━━\n"
+    bottle_msg += "━━━━━━━━━━\n"
     bottle_msg += f"投放者: {thrower_name}\n"
     bottle_msg += f"投放时间: {create_time}\n"
     bottle_msg += f"被捞起次数: {bottle['pick_count']}"
@@ -757,9 +757,9 @@ async def handle_pick_by_id(
     deleted_tag = "【已删除】" if bottle["deleted"] else ""
 
     bottle_msg = f"🍾 漂流瓶 #{bottle['id']} {deleted_tag}\n"
-    bottle_msg += f"━━━━━━━━━━\n"
+    bottle_msg += "━━━━━━━━━━\n"
     bottle_msg += f"{bottle['content']}\n"
-    bottle_msg += f"━━━━━━━━━━\n"
+    bottle_msg += "━━━━━━━━━━\n"
     bottle_msg += f"投放者UID: {bottle['uid']}\n"
     bottle_msg += f"投放时间: {create_time}\n"
     bottle_msg += f"被捞起次数: {bottle['pick_count']}"

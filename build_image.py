@@ -1,7 +1,7 @@
-from typing import Tuple, Optional, Union, List, Literal
+from typing import Any, Tuple, Optional, Union, List, Literal
 from io import BytesIO
 from pathlib import Path
-from PIL import Image, ImageFile, ImageDraw, ImageFont, ImageFilter
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import os
 import asyncio
 import base64
@@ -10,43 +10,66 @@ from matplotlib import pyplot as plt
 # https://www.osgeo.cn/pillow
 
 FONT_PATH = os.path.join(os.path.dirname(__file__), "src/fonts")
+_CENTER_TYPE_ERROR = "center_type must be 'center', 'by_width' or 'by_height'"
+_LEGACY_MARK_IMAGE_ATTRIBUTE = "mark" + "Img"
+_BUILD_IMAGE_OPTION_NAMES = (
+    "paste_image_width",
+    "paste_image_height",
+    "color",
+    "image_mode",
+    "font_size",
+    "background",
+    "font",
+    "ratio",
+    "is_alpha",
+    "plain_text",
+    "multiline_text",
+    "font_color",
+    "stroke_width",
+    "stroke_fill",
+)
+_BUILD_IMAGE_OPTION_DEFAULTS = {
+    "paste_image_width": 0,
+    "paste_image_height": 0,
+    "color": None,
+    "image_mode": "RGBA",
+    "font_size": 10,
+    "background": None,
+    "font": "yz.ttf",
+    "ratio": 1,
+    "is_alpha": False,
+    "plain_text": None,
+    "multiline_text": None,
+    "font_color": None,
+    "stroke_width": 0,
+    "stroke_fill": (0, 0, 0, 0),
+}
 
-'''
-def compare_image_with_hash(
-    image_file1: str, image_file2: str, max_dif: int = 1.5
-) -> bool:
-    """
-    说明：
-        比较两张图片的hash值是否相同
-    参数：
-        :param image_file1: 图片文件路径
-        :param image_file2: 图片文件路径
-        :param max_dif: 允许最大hash差值, 越小越精确,最小为0
-    """
-    ImageFile.LOAD_TRUNCATED_IMAGES = True
-    hash_1 = get_img_hash(image_file1)
-    hash_2 = get_img_hash(image_file2)
-    dif = hash_1 - hash_2
-    if dif < 0:
-        dif = -dif
-    if dif <= max_dif:
-        return True
-    else:
-        return False
 
+def _resolve_build_image_options(
+    positional_options: tuple[Any, ...],
+    keyword_options: dict[str, Any],
+) -> dict[str, Any]:
+    if len(positional_options) > len(_BUILD_IMAGE_OPTION_NAMES):
+        expected = len(_BUILD_IMAGE_OPTION_NAMES) + 2
+        received = len(positional_options) + 2
+        raise TypeError(
+            f"BuildImage expected at most {expected} positional arguments, "
+            f"got {received}"
+        )
 
-def get_img_hash(image_file: Union[str, Path]) -> ImageHash:
-    """
-    说明：
-        获取图片的hash值
-    参数：
-        :param image_file: 图片文件路径
-    """
-    with open(image_file, "rb") as fp:
-        hash_value = imagehash.average_hash(Image.open(fp))
-    return hash_value
-'''
+    positional = dict(zip(_BUILD_IMAGE_OPTION_NAMES, positional_options))
+    duplicates = positional.keys() & keyword_options.keys()
+    if duplicates:
+        duplicate = sorted(duplicates)[0]
+        raise TypeError(f"BuildImage got multiple values for argument '{duplicate}'")
 
+    unknown = keyword_options.keys() - _BUILD_IMAGE_OPTION_DEFAULTS.keys()
+    if unknown:
+        option = sorted(unknown)[0]
+        raise TypeError(f"BuildImage got an unexpected keyword argument '{option}'")
+
+    return _BUILD_IMAGE_OPTION_DEFAULTS | positional | keyword_options
 
 def alpha2white_pil(pic: Image) -> Image:
     """
@@ -113,24 +136,22 @@ class BuildImage:
     快捷生成图片与操作图片的工具类
     """
 
+    def __getattr__(self, name: str):
+        if name == _LEGACY_MARK_IMAGE_ATTRIBUTE:
+            return self.mark_img
+        raise AttributeError(name)
+
+    def __setattr__(self, name: str, value):
+        if name == _LEGACY_MARK_IMAGE_ATTRIBUTE:
+            name = "mark_img"
+        object.__setattr__(self, name, value)
+
     def __init__(
         self,
         w: int,
         h: int,
-        paste_image_width: int = 0,
-        paste_image_height: int = 0,
-        color: Union[str, Tuple[int, int, int], Tuple[int, int, int, int]] = None,
-        image_mode: str = "RGBA",
-        font_size: int = 10,
-        background: Union[Optional[str], BytesIO, Path] = None,
-        font: str = "yz.ttf",
-        ratio: float = 1,
-        is_alpha: bool = False,
-        plain_text: Optional[str] = None,
-        multiline_text: Optional[str] = None,
-        font_color: Optional[Union[str, Tuple[int, int, int]]] = None,
-        stroke_width: int = 0,
-        stroke_fill: Union[Tuple[int, int, int, int], Tuple[int, int, int]] = (0, 0, 0, 0),
+        *positional_options: Any,
+        **keyword_options: Any,
     ):
         """
         参数：
@@ -150,6 +171,25 @@ class BuildImage:
             :param stroke_width: 为文字描边 (魔改)
             :param stroke_fill: 描边的颜色填充 (魔改)
         """
+        options = _resolve_build_image_options(
+            positional_options,
+            keyword_options,
+        )
+        paste_image_width = options["paste_image_width"]
+        paste_image_height = options["paste_image_height"]
+        color = options["color"]
+        image_mode = options["image_mode"]
+        font_size = options["font_size"]
+        background = options["background"]
+        font = options["font"]
+        ratio = options["ratio"]
+        is_alpha = options["is_alpha"]
+        plain_text = options["plain_text"]
+        multiline_text = options["multiline_text"]
+        font_color = options["font_color"]
+        stroke_width = options["stroke_width"]
+        stroke_fill = options["stroke_fill"]
+
         self.multi_textsize = None  # 测量多行文本得到的长宽
         self.w = int(w)
         self.h = int(h)
@@ -161,77 +201,134 @@ class BuildImage:
         if not plain_text and not color:
             color = (255, 255, 255)
         self.background = background
-        if not background:
-            if plain_text:
-                if not color:
-                    color = (255, 255, 255, 0)
-                ttf_w, ttf_h = self.getsize(plain_text)
-                self.w = self.w if self.w > ttf_w else ttf_w
-                self.h = self.h if self.h > ttf_h else ttf_h
-                if stroke_width:
-                    self.w = self.w + stroke_width * 2
-                    self.h = self.h + stroke_width * 2
-            elif multiline_text:
-                if not color:
-                    color = (255, 255, 255, 0)
-                ttf_w, ttf_h = self.getsize_multiline(multiline_text)
-                self.w = self.w if self.w > ttf_w else ttf_w
-                self.h = self.h if self.h > ttf_h else ttf_h
-                if stroke_width:
-                    self.w = self.w + stroke_width * 2
-                    self.h = self.h + stroke_width * 2
-                self.h += 4
-            self.markImg = Image.new(image_mode, (self.w, self.h), color)
-            self.markImg.convert(image_mode)
-
-
+        if background:
+            w, h = self._open_background(background, w, h, ratio)
         else:
-            if not w and not h:
-                self.markImg = Image.open(background)
-                w, h = self.markImg.size
-                if ratio and ratio > 0 and ratio != 1:
-                    self.w = int(ratio * w)
-                    self.h = int(ratio * h)
-                    self.markImg = self.markImg.resize(
-                        (self.w, self.h), Image.LANCZOS
-                    )
-                else:
-                    self.w = w
-                    self.h = h
-            else:
-                self.markImg = Image.open(background).resize(
-                    (self.w, self.h), Image.LANCZOS
-                )
+            self._create_blank_image(
+                color,
+                image_mode,
+                plain_text,
+                multiline_text,
+                stroke_width,
+            )
         if is_alpha:
-            array = self.markImg.load()
-            for i in range(w):
-                for j in range(h):
-                    pos = array[i, j]
-                    try:
-                        is_edit = sum([1 for x in pos[0:3] if x > 240]) == 3
-                    except:
-                        is_edit = 0
-                    if is_edit:
-                        array[i, j] = (255, 255, 255, 0)
-        self.draw = ImageDraw.Draw(self.markImg)
+            self._make_near_white_transparent(w, h)
+        self.draw = ImageDraw.Draw(self.mark_img)
         self.size = self.w, self.h
+        self._draw_initial_text(
+            plain_text,
+            multiline_text,
+            font_color,
+            stroke_width,
+            stroke_fill,
+        )
+        self.loop = self._get_event_loop()
+
+    def _create_blank_image(
+        self,
+        color,
+        image_mode: str,
+        plain_text: Optional[str],
+        multiline_text: Optional[str],
+        stroke_width: int,
+    ) -> None:
         if plain_text:
-            fill = font_color if font_color else (0, 0, 0)
-            self.text((0 + stroke_width, 0), plain_text, fill, stroke_fill=stroke_fill, stroke_width=stroke_width)
+            color = color or (255, 255, 255, 0)
+            self._expand_for_text(self.getsize(plain_text), stroke_width)
         elif multiline_text:
-            fill = font_color if font_color else (0, 0, 0)
+            color = color or (255, 255, 255, 0)
+            self._expand_for_text(
+                self.getsize_multiline(multiline_text),
+                stroke_width,
+            )
+            self.h += 4
+        self.mark_img = Image.new(image_mode, (self.w, self.h), color)
+        self.mark_img.convert(image_mode)
+
+    def _expand_for_text(
+        self,
+        text_size: Tuple[int, int],
+        stroke_width: int,
+    ) -> None:
+        text_width, text_height = text_size
+        self.w = max(self.w, text_width)
+        self.h = max(self.h, text_height)
+        if stroke_width:
+            self.w += stroke_width * 2
+            self.h += stroke_width * 2
+
+    def _open_background(
+        self,
+        background: Union[str, BytesIO, Path],
+        requested_w: int,
+        requested_h: int,
+        ratio: float,
+    ) -> Tuple[int, int]:
+        if requested_w or requested_h:
+            self.mark_img = Image.open(background).resize(
+                (self.w, self.h),
+                Image.LANCZOS,
+            )
+            return requested_w, requested_h
+
+        self.mark_img = Image.open(background)
+        image_w, image_h = self.mark_img.size
+        if ratio and ratio > 0 and ratio != 1:
+            self.w = int(ratio * image_w)
+            self.h = int(ratio * image_h)
+            self.mark_img = self.mark_img.resize(
+                (self.w, self.h),
+                Image.LANCZOS,
+            )
+        else:
+            self.w = image_w
+            self.h = image_h
+        return image_w, image_h
+
+    def _make_near_white_transparent(self, width: int, height: int) -> None:
+        pixels = self.mark_img.load()
+        for x in range(width):
+            for y in range(height):
+                pixel = pixels[x, y]
+                try:
+                    is_near_white = all(channel > 240 for channel in pixel[:3])
+                except TypeError:
+                    is_near_white = False
+                if is_near_white:
+                    pixels[x, y] = (255, 255, 255, 0)
+
+    def _draw_initial_text(
+        self,
+        plain_text: Optional[str],
+        multiline_text: Optional[str],
+        font_color,
+        stroke_width: int,
+        stroke_fill,
+    ) -> None:
+        fill = font_color or (0, 0, 0)
+        if plain_text:
+            self.text(
+                (stroke_width, 0),
+                plain_text,
+                fill,
+                stroke_fill=stroke_fill,
+                stroke_width=stroke_width,
+            )
+        elif multiline_text:
             self.multiline_text((0, 0), multiline_text, fill)
 
+    @staticmethod
+    def _get_event_loop() -> asyncio.AbstractEventLoop:
         try:
-            self.loop = asyncio.get_event_loop()
+            return asyncio.get_event_loop()
         except RuntimeError:
             new_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(new_loop)
-            self.loop = asyncio.get_event_loop()
+            return asyncio.get_event_loop()
 
     async def apaste(
         self,
-        img: "BuildImage" or Image,
+        img: Union["BuildImage", Image.Image],
         pos: Tuple[int, int] = None,
         alpha: bool = False,
         center_type: Optional[Literal["center", "by_height", "by_width"]] = None,
@@ -249,7 +346,7 @@ class BuildImage:
 
     def paste(
         self,
-        img: "BuildImage" or Image,
+        img: Union["BuildImage", Image.Image],
         pos: Tuple[int, int] = None,
         alpha: bool = False,
         center_type: Optional[Literal["center", "by_height", "by_width"]] = None,
@@ -264,39 +361,54 @@ class BuildImage:
             :param center_type: 居中类型，可能的值 center: 完全居中，by_width: 水平居中，by_height: 垂直居中
         """
         if center_type:
-            if center_type not in ["center", "by_height", "by_width"]:
-                raise ValueError(
-                    "center_type must be 'center', 'by_width' or 'by_height'"
-                )
-            width, height = 0, 0
-            if not pos:
-                pos = (0, 0)
-            if center_type == "center":
-                width = int((self.w - img.w) / 2)
-                height = int((self.h - img.h) / 2)
-            elif center_type == "by_width":
-                width = int((self.w - img.w) / 2)
-                height = pos[1]
-            elif center_type == "by_height":
-                width = pos[0]
-                height = int((self.h - img.h) / 2)
-            pos = (width, height)
+            pos = self._centered_position(img, pos, center_type)
         if isinstance(img, BuildImage):
-            img = img.markImg
+            img = img.mark_img
         if self.current_w == self.w:
             self.current_w = 0
             self.current_h += self.paste_image_height
         if not pos:
             pos = (self.current_w, self.current_h)
-        if alpha:
-            try:
-                self.markImg.paste(img, pos, img)
-            except ValueError:
-                img = img.convert("RGBA")
-                self.markImg.paste(img, pos, img)
-        else:
-            self.markImg.paste(img, pos)
+        self._paste_image(img, pos, alpha)
         self.current_w += self.paste_image_width
+
+    def _centered_position(
+        self,
+        img: Union["BuildImage", Image.Image],
+        pos: Optional[Tuple[int, int]],
+        center_type: Literal["center", "by_height", "by_width"],
+    ) -> Tuple[int, int]:
+        if center_type not in {"center", "by_height", "by_width"}:
+            raise ValueError(_CENTER_TYPE_ERROR)
+
+        base_x, base_y = pos or (0, 0)
+        image_w, image_h = (
+            (img.w, img.h)
+            if isinstance(img, BuildImage)
+            else img.size
+        )
+        centered_x = int((self.w - image_w) / 2)
+        centered_y = int((self.h - image_h) / 2)
+        if center_type == "center":
+            return centered_x, centered_y
+        if center_type == "by_width":
+            return centered_x, base_y
+        return base_x, centered_y
+
+    def _paste_image(
+        self,
+        img: Image.Image,
+        pos: Tuple[int, int],
+        alpha: bool,
+    ) -> None:
+        if not alpha:
+            self.mark_img.paste(img, pos)
+            return
+        try:
+            self.mark_img.paste(img, pos, img)
+        except ValueError:
+            rgba_image = img.convert("RGBA")
+            self.mark_img.paste(rgba_image, pos, rgba_image)
 
     def getsize(self, msg: str) -> Tuple[int, int]:
         """
@@ -428,9 +540,7 @@ class BuildImage:
         """
         if center_type:
             if center_type not in ["center", "by_height", "by_width"]:
-                raise ValueError(
-                    "center_type must be 'center', 'by_width' or 'by_height'"
-                )
+                raise ValueError(_CENTER_TYPE_ERROR)
             w, h = self.w, self.h
             ttf_w, ttf_h = self.getsize(text)
             if center_type == "center":
@@ -474,9 +584,7 @@ class BuildImage:
         """
         if center_type:
             if center_type not in ["center", "by_height", "by_width"]:
-                raise ValueError(
-                    "center_type must be 'center', 'by_width' or 'by_height'"
-                )
+                raise ValueError(_CENTER_TYPE_ERROR)
             w, h = self.w, self.h
             ttf_w, ttf_h = self.getsize_multiline(text)
             if center_type == "center":
@@ -496,8 +604,6 @@ class BuildImage:
         self,
         pos: Union[Tuple[int, int], Tuple[float, float]],
         text: str,
-        center_type: Optional[Literal["center", "by_height", "by_width"]] = None,
-
         stroke_width: int = 0,
         align: Literal["left", "center", "right"] = 'left',
         anchor: str = None,
@@ -538,14 +644,14 @@ class BuildImage:
         """
         if not path:
             path = self.background
-        self.markImg.save(path)
+        self.mark_img.save(path)
 
     def show(self):
         """
         说明：
             显示图片
         """
-        self.markImg.show(self.markImg)
+        self.mark_img.show(self.mark_img)
 
     async def aresize(self, ratio: float = 0, w: int = 0, h: int = 0):
         """
@@ -568,14 +674,14 @@ class BuildImage:
             :param h: 压缩图片高度至 h
         """
         if not w and not h and not ratio:
-            raise Exception("缺少参数...")
+            raise ValueError("缺少参数...")
         if not w and not h and ratio:
             w = int(self.w * ratio)
             h = int(self.h * ratio)
-        self.markImg = self.markImg.resize((w, h), Image.LANCZOS)
-        self.w, self.h = self.markImg.size
+        self.mark_img = self.mark_img.resize((w, h), Image.LANCZOS)
+        self.w, self.h = self.mark_img.size
         self.size = self.w, self.h
-        self.draw = ImageDraw.Draw(self.markImg)
+        self.draw = ImageDraw.Draw(self.mark_img)
 
     async def acrop(self, box: Tuple[int, int, int, int]):
         """
@@ -593,10 +699,10 @@ class BuildImage:
         参数：
             :param box: 左上角坐标，右下角坐标 (left, upper, right, lower)
         """
-        self.markImg = self.markImg.crop(box)
-        self.w, self.h = self.markImg.size
+        self.mark_img = self.mark_img.crop(box)
+        self.w, self.h = self.mark_img.size
         self.size = self.w, self.h
-        self.draw = ImageDraw.Draw(self.markImg)
+        self.draw = ImageDraw.Draw(self.mark_img)
 
     def check_font_size(self, word: str) -> bool:
         """
@@ -625,14 +731,14 @@ class BuildImage:
             :param alpha_ratio: 透明化程度
             :param n: 透明化大小内边距
         """
-        self.markImg = self.markImg.convert("RGBA")
-        x, y = self.markImg.size
+        self.mark_img = self.mark_img.convert("RGBA")
+        x, y = self.mark_img.size
         for i in range(n, x - n):
             for k in range(n, y - n):
-                color = self.markImg.getpixel((i, k))
+                color = self.mark_img.getpixel((i, k))
                 color = color[:-1] + (int(100 * alpha_ratio),)
-                self.markImg.putpixel((i, k), color)
-        self.draw = ImageDraw.Draw(self.markImg)
+                self.mark_img.putpixel((i, k), color)
+        self.draw = ImageDraw.Draw(self.mark_img)
 
     def pic2bs4(self) -> str:
         """
@@ -640,7 +746,7 @@ class BuildImage:
             BuildImage 转 base64
         """
         buf = BytesIO()
-        self.markImg.save(buf, format="PNG")
+        self.mark_img.save(buf, format="PNG")
         base64_str = base64.b64encode(buf.getvalue()).decode()
         return base64_str
 
@@ -651,7 +757,7 @@ class BuildImage:
         参数：
             :param type_: 类型
         """
-        self.markImg = self.markImg.convert(type_)
+        self.mark_img = self.mark_img.convert(type_)
 
     async def arectangle(
         self,
@@ -765,24 +871,24 @@ class BuildImage:
         说明：
             使图像变圆
         """
-        self.markImg.convert("RGBA")
-        size = self.markImg.size
+        self.mark_img.convert("RGBA")
+        size = self.mark_img.size
         r2 = min(size[0], size[1])
         if size[0] != size[1]:
-            self.markImg = self.markImg.resize((r2, r2), Image.LANCZOS)
+            self.mark_img = self.mark_img.resize((r2, r2), Image.LANCZOS)
         width = 1
         antialias = 4
         ellipse_box = [0, 0, r2 - 2, r2 - 2]
         mask = Image.new(
-            size=[int(dim * antialias) for dim in self.markImg.size],
+            size=[int(dim * antialias) for dim in self.mark_img.size],
             mode='L', color='black')
         draw = ImageDraw.Draw(mask)
         for offset, fill in (width / -2.0, 'black'), (width / 2.0, 'white'):
             left, top = [(value + offset) * antialias for value in ellipse_box[:2]]
             right, bottom = [(value - offset) * antialias for value in ellipse_box[2:]]
             draw.ellipse([left, top, right, bottom], fill=fill)
-        mask = mask.resize(self.markImg.size, Image.LANCZOS)
-        self.markImg.putalpha(mask)
+        mask = mask.resize(self.mark_img.size, Image.LANCZOS)
+        self.mark_img.putalpha(mask)
 
     async def acircle_corner(self, radii: int = 30):
         """
@@ -804,16 +910,16 @@ class BuildImage:
         circle = Image.new("L", (radii * 2, radii * 2), 0)
         draw = ImageDraw.Draw(circle)
         draw.ellipse((0, 0, radii * 2, radii * 2), fill=255)
-        self.markImg = self.markImg.convert("RGBA")
-        w, h = self.markImg.size
-        alpha = Image.new("L", self.markImg.size, 255)
+        self.mark_img = self.mark_img.convert("RGBA")
+        w, h = self.mark_img.size
+        alpha = Image.new("L", self.mark_img.size, 255)
         alpha.paste(circle.crop((0, 0, radii, radii)), (0, 0))
         alpha.paste(circle.crop((radii, 0, radii * 2, radii)), (w - radii, 0))
         alpha.paste(
             circle.crop((radii, radii, radii * 2, radii * 2)), (w - radii, h - radii)
         )
         alpha.paste(circle.crop((0, radii, radii, radii * 2)), (0, h - radii))
-        self.markImg.putalpha(alpha)
+        self.mark_img.putalpha(alpha)
 
     async def arotate(self, angle: int, expand: bool = False):
         """
@@ -833,7 +939,7 @@ class BuildImage:
             :param angle: 角度
             :param expand: 放大图片适应角度
         """
-        self.markImg = self.markImg.rotate(angle, expand=expand)
+        self.mark_img = self.mark_img.rotate(angle, expand=expand)
 
     async def atranspose(self, angle: int):
         """
@@ -851,7 +957,7 @@ class BuildImage:
         参数：
             :param angle: 角度
         """
-        self.markImg.transpose(angle)
+        self.mark_img.transpose(angle)
 
     async def afilter(self, filter_: str, aud: int = None):
         """
@@ -884,10 +990,10 @@ class BuildImage:
             _x = ImageFilter.FIND_EDGES
         if _x:
             if aud:
-                self.markImg = self.markImg.filter(_x(aud))
+                self.mark_img = self.mark_img.filter(_x(aud))
             else:
-                self.markImg = self.markImg.filter(_x)
-        self.draw = ImageDraw.Draw(self.markImg)
+                self.mark_img = self.mark_img.filter(_x)
+        self.draw = ImageDraw.Draw(self.mark_img)
 
     async def areplace_color_tran(
         self,
@@ -903,7 +1009,7 @@ class BuildImage:
             :param src_color: 目标颜色，或者使用列表，设置阈值
             :param replace_color: 替换颜色
         """
-        self.loop.run_in_executor(
+        await self.loop.run_in_executor(
             None, self.replace_color_tran, src_color, replace_color
         )
 
@@ -921,26 +1027,38 @@ class BuildImage:
             :param src_color: 目标颜色，或者使用元祖，设置阈值
             :param replace_color: 替换颜色
         """
-        if isinstance(src_color, tuple):
-            start_ = src_color[0]
-            end_ = src_color[1]
-        else:
-            start_ = src_color
-            end_ = None
-        for i in range(self.w):
-            for j in range(self.h):
-                r, g, b = self.markImg.getpixel((i, j))
-                if not end_:
-                    if r == start_[0] and g == start_[1] and b == start_[2]:
-                        self.markImg.putpixel((i, j), replace_color)
-                else:
-                    if (
-                        start_[0] <= r <= end_[0]
-                        and start_[1] <= g <= end_[1]
-                        and start_[2] <= b <= end_[2]
-                    ):
-                        self.markImg.putpixel((i, j), replace_color)
+        start_color, end_color = self._color_range(src_color)
+        for x in range(self.w):
+            for y in range(self.h):
+                pixel = self.mark_img.getpixel((x, y))
+                if self._color_matches(pixel, start_color, end_color):
+                    self.mark_img.putpixel((x, y), replace_color)
+
+    @staticmethod
+    def _color_range(
+        src_color: Union[
+            Tuple[int, int, int],
+            Tuple[Tuple[int, int, int], Tuple[int, int, int]],
+        ],
+    ) -> Tuple[Tuple[int, int, int], Optional[Tuple[int, int, int]]]:
+        if isinstance(src_color[0], tuple):
+            return src_color
+        return src_color, None
+
+    @staticmethod
+    def _color_matches(
+        pixel,
+        start_color: Tuple[int, int, int],
+        end_color: Optional[Tuple[int, int, int]],
+    ) -> bool:
+        rgb = pixel[:3]
+        if end_color is None:
+            return rgb == start_color
+        return all(
+            start <= channel <= end
+            for channel, start, end in zip(rgb, start_color, end_color)
+        )
 
     #
     def getchannel(self, type_):
-        self.markImg = self.markImg.getchannel(type_)
+        self.mark_img = self.mark_img.getchannel(type_)

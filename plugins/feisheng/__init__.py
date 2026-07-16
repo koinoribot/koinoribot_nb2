@@ -1,9 +1,3 @@
-"""
-飞升之路插件
-
-平行于宠物系统，提供飞升相关功能
-"""
-
 import random
 from nonebot import on_command, logger
 from nonebot.adapters import Event, Bot, Message
@@ -131,7 +125,7 @@ async def handle_pet_ascend(event: Event, bot: Bot, uid: int = Depends(get_uid))
     status = min(max_hunger, max_happiness, max_energy)
     
     if status <= 999999:
-        await pet_ascend_cmd.finish(f"你的宠物还未达到誓约状态，当前的羁绊还不足以支撑飞升！", at_sender=True)
+        await pet_ascend_cmd.finish("你的宠物还未达到誓约状态，当前的羁绊还不足以支撑飞升！", at_sender=True)
     
     fs_data = await get_feisheng_data(uid)
     if fs_data["is_pet_ascended"]:
@@ -146,13 +140,13 @@ async def handle_pet_ascend(event: Event, bot: Bot, uid: int = Depends(get_uid))
     current_progress = new_data["pet_ascension_progress"]
     
     if new_data["is_pet_ascended"]:
-        msg = f"消耗了1个誓约戒指...\n"
+        msg = "消耗了1个誓约戒指...\n"
         msg += f"一道金光闪过，进度+{progress_add}，{pet['name']}开始飞升...\n"
         msg += f"恭喜！你的宠物【{pet.get('name', '宠物')}】已成功完成飞升仪式！前往了更高的维度...\n"
         msg += f"\n {pet['name']}回首人间，心觉不舍，强行为你打开了飞升之路。发送 飞升之路 查看进度。"
         await pet_ascend_cmd.finish(msg, at_sender=True)
     else:
-        msg = f"消耗了1个誓约戒指...\n"
+        msg = "消耗了1个誓约戒指...\n"
         msg += f"飞升仪式正在进行中，进度+{progress_add}\n"
         msg += f"当前进度：{current_progress}%"
         await pet_ascend_cmd.finish(msg, at_sender=True)
@@ -204,14 +198,14 @@ async def handle_cultivate(event: Event, bot: Bot, uid: int = Depends(get_uid)):
     new_progress = fs_data["ascension_progress"]
     stage = get_stage_name(new_progress)
     
-    msg = f"🧘开始修炼...\n"
+    msg = "🧘开始修炼...\n"
     msg += f"消耗{cost}宝石，吸纳天地灵气...\n"
     msg += f"进度+{progress_add}，当前境界：{realm_name}境 {stage} ({new_progress}%)"
     msg += f"\n(今日已修炼 {fs_data['daily_cultivation_count']}/5 次)"
     
     if new_progress >= 100:
         if current_realm >= len(REALMS) - 1:
-             msg += f"\n🎉 境界已圆满，可以飞升！\n请使用 渡劫飞升 尝试飞升上界！"
+             msg += "\n🎉 境界已圆满，可以飞升！\n请使用 渡劫飞升 尝试飞升上界！"
         else:
             b_rate = max(10, 90 - (current_realm * 8))
             l_rate = b_rate + (100 - b_rate) // 2
@@ -261,8 +255,8 @@ async def handle_buy_item(
             quantity = int(arg_parts[1])
             if quantity <= 0:
                 await buy_item_cmd.finish("\n数量必须是正整数！", at_sender=True)
-        except:
-             await buy_item_cmd.finish("\n数量格式错误！", at_sender=True)
+        except ValueError:
+            await buy_item_cmd.finish("\n数量格式错误！", at_sender=True)
              
     # 查找物品价格
     price = 0
@@ -369,7 +363,7 @@ async def process_breakthrough(uid: int, bot: Bot, event: Event, use_lucky: bool
         fs_data["ascension_progress"] = 50
         await update_feisheng_data(uid, fs_data)
         
-        msg += f"突破失败！\n境界跌落至中期。"
+        msg += "突破失败！\n境界跌落至中期。"
         await bot.send(event, msg, at_sender=True)
 
 # ===== 普通突破 =====
@@ -390,6 +384,53 @@ async def handle_lucky_breakthrough(event: Event, bot: Bot, uid: int = Depends(g
 # ===== 飞升 =====
 ascend_cmd = on_command("渡劫飞升", priority=5, block=True)
 
+
+def _ascension_confirmation(pill_name: str, has_pill: bool) -> str:
+    msg = "\n【飞升提醒】\n"
+    if has_pill:
+        msg += f"检测到你持有【{pill_name}】，使用它护体可保 100% 飞升成功！\n"
+        return msg + "发送『渡劫飞升 确认』开始渡劫。"
+    msg += f"警告：你当前【未持有】{pill_name}！\n"
+    msg += "强行渡劫成功率仅为 50%\n"
+    msg += "失败后果：【身死道消】，境界重置为锻体！\n"
+    return msg + "若执意逆天而行，请发送『渡劫飞升 确认』。"
+
+
+async def _attempt_ascension(uid: int, pill_name: str, has_pill: bool):
+    if has_pill:
+        if not await use_feisheng_item(uid, pill_name, 1):
+            return None, "\n物品消耗失败，请稍后再试。"
+        return True, f"\n吞服{pill_name}，药力化作金光护住心脉...\n"
+    return (
+        random.randint(1, 100) <= 50,
+        "\n你仰天长啸，决意以肉身硬撼天劫！\n",
+    )
+
+
+def _ascension_story(success: bool, pet_name: str) -> str:
+    if success:
+        return (
+            "轰——！九道紫霄神雷落下，却被你的无上法力尽数化解！\n"
+            "天门洞开，仙音缭绕，一道接引神光将你缓缓托起...\n"
+            "恭喜道友成功渡劫飞升，位列仙班！\n"
+            "仙气缭绕的上界，你远远地就望见一道熟悉的身影...\n"
+            f"“主人！终于...又见面了...”{pet_name}紧紧地抱着你...一如初见。\n"
+            f"“对了，主人，{pet_name}独自在上界这么多年，已经为主人攒好了见面礼哦~”\n"
+            "(发送 注册激活码 可以获取su权限)"
+        )
+    return (
+        "轰——！最后一道灭世神雷挟毁天灭地之威落下，瞬间击碎了你的护体灵气...\n"
+        "肉身崩解，神魂将散，你感到无尽的冰冷与黑暗袭来，意识逐渐模糊。\n"
+        "“就这样结束了吗...”\n"
+        f"就在你即将湮灭之际，一个熟悉的身影——{pet_name}逆流而下，拼尽全力挡在了你的残魂之前。\n"
+        "“主人，这一次，该我来守护你了...”\n"
+        "金光包裹着你的那一缕真灵，强行冲破了轮回的迷雾，而借来的仙力也随即消散...\n"
+        "\n......\n"
+        "不知过了多久，你再次惊醒，发现自己躺在熟悉的草地上，已是凡人之躯。\n"
+        "虽然千载修为尽失(重置为锻体)，但掌心残留的温热让你明白，这一世，绝不能再辜负这份羁绊。"
+    )
+
+
 @ascend_cmd.handle()
 async def handle_ascend(event: Event, bot: Bot, args: Message = CommandArg(), uid: int = Depends(get_uid)):
     fs_data = await get_feisheng_data(uid)
@@ -407,138 +448,96 @@ async def handle_ascend(event: Event, bot: Bot, args: Message = CommandArg(), ui
     if current_realm < last_realm_index or (current_realm == last_realm_index and current_progress < 100):
         await ascend_cmd.finish("\n你的境界未达【渡劫】大圆满，无法承受飞升雷劫！\n请继续修炼。", at_sender=True)
     
-    # 检查命令参数
     arg_str = args.extract_plain_text().strip()
-    
-    # 检查是否有升仙丸
     pill_name = SHENGXIAN_WAN["name"]
     user_items = await get_user_feisheng_items(uid)
     has_pill_count = user_items.get(pill_name, 0)
     
     if arg_str != "确认":
-        msg = "\n【飞升提醒】\n"
-        if has_pill_count > 0:
-            msg += f"检测到你持有【{pill_name}】，使用它护体可保 100% 飞升成功！\n"
-            msg += "发送『渡劫飞升 确认』开始渡劫。"
-        else:
-            msg += f"警告：你当前【未持有】{pill_name}！\n"
-            msg += "强行渡劫成功率仅为 50%\n"
-            msg += "失败后果：【身死道消】，境界重置为锻体！\n"
-            msg += "若执意逆天而行，请发送『渡劫飞升 确认』。"
+        await ascend_cmd.finish(
+            _ascension_confirmation(pill_name, has_pill_count > 0),
+            at_sender=True,
+        )
+
+    success, msg = await _attempt_ascension(uid, pill_name, has_pill_count > 0)
+    if success is None:
         await ascend_cmd.finish(msg, at_sender=True)
 
-    # ===== 执行飞升逻辑 =====
-    success = False
-    msg = ""
-    
-    if has_pill_count > 0:
-        # 有药，消耗药，成功率100%
-        if await use_feisheng_item(uid, pill_name, 1):
-             success = True
-             msg += f"\n吞服{pill_name}，药力化作金光护住心脉...\n"
-        else:
-             await ascend_cmd.finish(f"\n物品消耗失败，请稍后再试。", at_sender=True)
-    else:
-        # 无药，50%概率
-        msg += "\n你仰天长啸，决意以肉身硬撼天劫！\n"
-        if random.randint(1, 100) <= 50:
-            success = True
-        else:
-            success = False
-    # 获取宠物名字用于剧情
     pet = await get_user_pet(uid)
     pet_name = pet.get("name", "昔日的伙伴") if pet else "昔日的伙伴"
     if success:
         fs_data["is_ascended"] = 1
-        await update_feisheng_data(uid, fs_data)
-        
-        msg += "轰——！九道紫霄神雷落下，却被你的无上法力尽数化解！\n"
-        msg += "天门洞开，仙音缭绕，一道接引神光将你缓缓托起...\n"
-        msg += "恭喜道友成功渡劫飞升，位列仙班！\n"
-        msg += "仙气缭绕的上界，你远远地就望见一道熟悉的身影...\n"
-        msg += f"“主人！终于...又见面了...”{pet_name}紧紧地抱着你...一如初见。\n"
-        msg += f"“对了，主人，{pet_name}独自在上界这么多年，已经为主人攒好了见面礼哦~”\n(发送 注册激活码 可以获取su权限)"
-        await ascend_cmd.finish(msg, at_sender=True)
     else:
-        # 失败，重置
         fs_data["realm_level"] = 0
         fs_data["ascension_progress"] = 0
-        await update_feisheng_data(uid, fs_data)
-
-        msg += "轰——！最后一道灭世神雷挟毁天灭地之威落下，瞬间击碎了你的护体灵气...\n"
-        msg += "肉身崩解，神魂将散，你感到无尽的冰冷与黑暗袭来，意识逐渐模糊。\n"
-        msg += "“就这样结束了吗...”\n"
-        msg += f"就在你即将湮灭之际，一个熟悉的身影——{pet_name}逆流而下，拼尽全力挡在了你的残魂之前。\n"
-        msg += "“主人，这一次，该我来守护你了...”\n"
-        msg += "金光包裹着你的那一缕真灵，强行冲破了轮回的迷雾，而借来的仙力也随即消散...\n"
-        msg += "\n......\n"
-        msg += "不知过了多久，你再次惊醒，发现自己躺在熟悉的草地上，已是凡人之躯。\n"
-        msg += "虽然千载修为尽失(重置为锻体)，但掌心残留的温热让你明白，这一世，绝不能再辜负这份羁绊。"
-        await ascend_cmd.finish(msg, at_sender=True)
+    await update_feisheng_data(uid, fs_data)
+    await ascend_cmd.finish(msg + _ascension_story(success, pet_name), at_sender=True)
 
 
 # ===== 飞升之路 (查询进度) =====
 feisheng_path_cmd = on_command("飞升之路", priority=5, block=True)
 
-@feisheng_path_cmd.handle()
-async def handle_feisheng_path(event: Event, bot: Bot, uid: int = Depends(get_uid)):
-    # 1. 获取宠物数据
-    pet = await get_user_pet(uid)
-    if not pet or pet.get("temp_data"):
-        await feisheng_path_cmd.finish("\n你还没有宠物，未开启飞升之路。", at_sender=True)
-    
-    # 2. 检查誓约状态
-    max_hunger = pet.get("max_hunger", 0)
-    max_happiness = pet.get("max_happiness", 0)
-    max_energy = pet.get("max_energy", 0)
-    
-    status = min(max_hunger, max_happiness, max_energy)
-    
-    if status <= 999999:
-        # 不查表，直接返回
-        await feisheng_path_cmd.finish(f"\n你的宠物【{pet.get('name')}】尚未誓约，未达到开启飞升之路的条件。", at_sender=True)
-        
-    # 3. 查询飞升数据
-    fs_data = await get_feisheng_data(uid)
-    
+
+def _format_feisheng_progress(fs_data: dict) -> str:
     pet_progress = fs_data["pet_ascension_progress"]
     is_pet_ascended = fs_data["is_pet_ascended"]
     is_ascended = fs_data["is_ascended"]
     realm_level = fs_data.get("realm_level", 0)
     ascension_progress = fs_data.get("ascension_progress", 0)
-    
     realm_name = get_realm_name(realm_level)
     stage_name = get_stage_name(ascension_progress)
-    
-    msg = f"\n飞升之路"
-    msg += "━━━━━━━━━━━━━━\n"
-    
-    if is_pet_ascended:
-        msg += f"【宠物飞升】：已完成\n"
-        if is_ascended:
-             msg += f"【个人境界】：{realm_name} (已飞升)\n"
-        else:
-             msg += f"【个人境界】：{realm_name}境 {stage_name} ({ascension_progress}%)\n"
-    else:
-        msg += f"【宠物飞升】：进行中 ({pet_progress}%)\n"
-        msg += f"【个人境界】：仙路未开启\n"
-    
-    msg += "━━━━━━━━━━━━━━\n"
+
     if not is_pet_ascended:
-        msg += "消耗誓约戒指进行宠物飞升"
-    elif not is_ascended:
-        if ascension_progress >= 100:
-             if realm_level >= len(REALMS) - 1:
-                 msg += "已达渡劫大圆满，请使用 渡劫飞升"
-             else:
-                 b_rate = max(10, 90 - (realm_level * 8))
-                 l_rate = b_rate + (100 - b_rate) // 2
-                 msg += f"境界已圆满，可以突破！\n普通突破 成功率{b_rate}% \n幸运突破 成功率{l_rate}%"
-        else:
-            msg += "消耗宝石进行修炼"
-    else:
-        msg += "你已立于云端之上。\n可用 获取激活码 获得SU权限。"
+        return (
+            f"【宠物飞升】：进行中 ({pet_progress}%)\n"
+            "【个人境界】：仙路未开启\n"
+        )
+    if is_ascended:
+        return f"【宠物飞升】：已完成\n【个人境界】：{realm_name} (已飞升)\n"
+    return (
+        "【宠物飞升】：已完成\n"
+        f"【个人境界】：{realm_name}境 {stage_name} ({ascension_progress}%)\n"
+    )
+
+
+def _next_feisheng_action(fs_data: dict) -> str:
+    if not fs_data["is_pet_ascended"]:
+        return "消耗誓约戒指进行宠物飞升"
+    if fs_data["is_ascended"]:
+        return "你已立于云端之上。\n可用 获取激活码 获得SU权限。"
+
+    ascension_progress = fs_data.get("ascension_progress", 0)
+    if ascension_progress < 100:
+        return "消耗宝石进行修炼"
+
+    realm_level = fs_data.get("realm_level", 0)
+    if realm_level >= len(REALMS) - 1:
+        return "已达渡劫大圆满，请使用 渡劫飞升"
+    base_rate = max(10, 90 - (realm_level * 8))
+    lucky_rate = base_rate + (100 - base_rate) // 2
+    return (
+        "境界已圆满，可以突破！\n"
+        f"普通突破 成功率{base_rate}% \n幸运突破 成功率{lucky_rate}%"
+    )
+
+
+@feisheng_path_cmd.handle()
+async def handle_feisheng_path(event: Event, bot: Bot, uid: int = Depends(get_uid)):
+    pet = await get_user_pet(uid)
+    if not pet or pet.get("temp_data"):
+        await feisheng_path_cmd.finish("\n你还没有宠物，未开启飞升之路。", at_sender=True)
+    
+    max_hunger = pet.get("max_hunger", 0)
+    max_happiness = pet.get("max_happiness", 0)
+    max_energy = pet.get("max_energy", 0)
+    if min(max_hunger, max_happiness, max_energy) <= 999999:
+        await feisheng_path_cmd.finish(f"\n你的宠物【{pet.get('name')}】尚未誓约，未达到开启飞升之路的条件。", at_sender=True)
         
+    fs_data = await get_feisheng_data(uid)
+    msg = "\n飞升之路━━━━━━━━━━━━━━\n"
+    msg += _format_feisheng_progress(fs_data)
+    msg += "━━━━━━━━━━━━━━\n"
+    msg += _next_feisheng_action(fs_data)
     await feisheng_path_cmd.finish(msg, at_sender=True)
 
 
@@ -622,13 +621,10 @@ async def handle_feisheng_rank(event: Event, bot: Bot, uid: int = Depends(get_ui
              break
              
     if my_rank != -1:
-        if my_rank <= 10:
-             msg += f"\n您的排名: 第{my_rank}名"
-        else:
-             msg += f"\n您的排名: 第{my_rank}名"
+        msg += f"\n您的排名: 第{my_rank}名"
     else:
         msg += "\n您的排名: 未上榜"
-    msg += f"\n\n\n使用 冰祈请叫我 可以修改自己的昵称哦~"
+    msg += "\n\n\n使用 冰祈请叫我 可以修改自己的昵称哦~"
 
     chain = await build_forward_chain(bot, [msg])
     await send_group_forward_msg(event, bot, chain)

@@ -1,9 +1,3 @@
-"""
-宠物数据操作模块
-
-处理宠物和物品的数据库操作
-"""
-
 import json
 import sqlite3
 import asyncio
@@ -16,6 +10,7 @@ from .petconfig import BASE_PETS, STATUS_DESCRIPTIONS, GROWTH_STAGE_1, GROWTH_ST
 # 数据库路径
 _db_path: Optional[str] = None
 _db_initialized = False
+USER_ITEMS_QUERY = 'SELECT items_data FROM user_items WHERE uid = ?'
 
 
 def set_db_path(path: str):
@@ -151,7 +146,7 @@ async def get_user_items(user_id: int) -> dict:
     def _query():
         conn = _get_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT items_data FROM user_items WHERE uid = ?', (user_id,))
+        cursor.execute(USER_ITEMS_QUERY, (user_id,))
         result = cursor.fetchone()
         conn.close()
         
@@ -171,7 +166,7 @@ async def add_user_item(user_id: int, item_name: str, quantity: int = 1):
         conn = _get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('SELECT items_data FROM user_items WHERE uid = ?', (user_id,))
+        cursor.execute(USER_ITEMS_QUERY, (user_id,))
         result = cursor.fetchone()
         
         if result and result['items_data']:
@@ -201,7 +196,7 @@ async def use_user_item(user_id: int, item_name: str, quantity: int = 1) -> bool
         conn = _get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('SELECT items_data FROM user_items WHERE uid = ?', (user_id,))
+        cursor.execute(USER_ITEMS_QUERY, (user_id,))
         result = cursor.fetchone()
         
         if not result or not result['items_data']:
@@ -248,7 +243,7 @@ def get_status_description(stat_name: str, value: float) -> str:
     return "状态异常"
 
 
-async def update_pet_status(pet: dict) -> dict:
+def update_pet_status(pet: dict) -> dict:
     """更新宠物状态（时间衰减）"""
     current_time = time.time()
     last_update = pet.get("last_update", current_time)
@@ -287,7 +282,7 @@ async def update_pet_status(pet: dict) -> dict:
     return pet
 
 
-async def check_pet_evolution(pet: dict) -> Optional[str]:
+def check_pet_evolution(pet: dict) -> Optional[str]:
     """检查宠物是否可以进化"""
     if pet["stage"] == 0 and pet["growth"] >= pet.get("growth_required", 100):
         return "stage1"

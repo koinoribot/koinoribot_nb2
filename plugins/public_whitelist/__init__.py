@@ -500,7 +500,35 @@ def _render_error_result(message: str, status_text: str = "未找到") -> str:
     </section>"""
 
 
-async def _handle_whitelist_web_index(request: web.Request) -> web.Response:
+def _render_whitelist_query_result(owner_qq: str, bot_qq: str) -> str:
+    if not owner_qq or not bot_qq:
+        return _render_error_result("主人 QQ 和 bot QQ 都需要填写。", "无法查询")
+    if not owner_qq.isdigit() or not bot_qq.isdigit():
+        return _render_error_result("主人 QQ 和 bot QQ 只能填写数字。", "无法查询")
+    if _is_whitelist_pair(owner_qq, bot_qq):
+        return _render_success_result(owner_qq, bot_qq)
+
+    review = _get_latest_review(owner_qq, bot_qq)
+    if not review:
+        return _render_error_result("没有找到匹配的白名单绑定关系或待审核申请。")
+
+    status = review.get("status")
+    if status == "pending":
+        return _render_pending_result(owner_qq, bot_qq, review)
+    if status == "rejected":
+        return _render_rejected_result(owner_qq, bot_qq, review)
+    if status == "approved":
+        return _render_error_result(
+            "审核状态为已通过，但白名单尚未生效，请联系管理员处理。",
+            "已通过，白名单未生效",
+        )
+    return _render_error_result(
+        "申请存在，但当前状态暂不返回 WS 连接地址。",
+        str(status or "未知"),
+    )
+
+
+async def _handle_whitelist_web_index(request: web.Request) -> web.Response:  # NOSONAR - aiohttp requires an async handler
     return web.Response(
         text=_render_whitelist_page(),
         content_type="text/html",
@@ -513,30 +541,7 @@ async def _handle_whitelist_web_query(request: web.Request) -> web.Response:
     owner_qq = str(data.get("owner_qq", "")).strip()
     bot_qq = str(data.get("bot_qq", "")).strip()
 
-    if not owner_qq or not bot_qq:
-        result_html = _render_error_result("主人 QQ 和 bot QQ 都需要填写。", "无法查询")
-    elif not owner_qq.isdigit() or not bot_qq.isdigit():
-        result_html = _render_error_result("主人 QQ 和 bot QQ 只能填写数字。", "无法查询")
-    elif _is_whitelist_pair(owner_qq, bot_qq):
-        result_html = _render_success_result(owner_qq, bot_qq)
-    else:
-        review = _get_latest_review(owner_qq, bot_qq)
-        if review and review.get("status") == "pending":
-            result_html = _render_pending_result(owner_qq, bot_qq, review)
-        elif review and review.get("status") == "rejected":
-            result_html = _render_rejected_result(owner_qq, bot_qq, review)
-        elif review and review.get("status") == "approved":
-            result_html = _render_error_result(
-                "审核状态为已通过，但白名单尚未生效，请联系管理员处理。",
-                "已通过，白名单未生效"
-            )
-        elif review:
-            result_html = _render_error_result(
-                "申请存在，但当前状态暂不返回 WS 连接地址。",
-                str(review.get("status") or "未知")
-            )
-        else:
-            result_html = _render_error_result("没有找到匹配的白名单绑定关系或待审核申请。")
+    result_html = _render_whitelist_query_result(owner_qq, bot_qq)
 
     return web.Response(
         text=_render_whitelist_page(owner_qq, bot_qq, result_html),
@@ -545,7 +550,7 @@ async def _handle_whitelist_web_query(request: web.Request) -> web.Response:
     )
 
 
-async def _handle_whitelist_web_health(request: web.Request) -> web.Response:
+async def _handle_whitelist_web_health(request: web.Request) -> web.Response:  # NOSONAR - aiohttp requires an async handler
     return web.json_response({"ok": True, "whitelist_size": get_whitelist_size()})
 
 
@@ -650,6 +655,7 @@ async def _whitelist_filter(event: Event):
 # ================== 领养申请上下文（内存，多轮对话用） ==================
 
 _apply_context: Dict[str, dict] = {}  # {user_id: {step, owner_qq, bot_qq, reason, ...}}
+ADOPTION_ENDED_MESSAGE = "已结束领养云冰祈~"
 
 
 # ================== 领养云冰祈 — 多轮对话 ==================
@@ -729,7 +735,7 @@ async def handle_step_bot_qq(
         return
     if user_input == '退出':
         _apply_context.pop(user_id, None)
-        await adopt_cmd.finish("已结束领养云冰祈~", at_sender=True)
+        await adopt_cmd.finish(ADOPTION_ENDED_MESSAGE, at_sender=True)
 
     if not user_input.isdigit():
         await adopt_cmd.reject("需要输入QQ号码~", at_sender=True)
@@ -771,7 +777,7 @@ async def handle_step_reason(
         return
     if user_input == '退出':
         _apply_context.pop(user_id, None)
-        await adopt_cmd.finish("已结束领养云冰祈~", at_sender=True)
+        await adopt_cmd.finish(ADOPTION_ENDED_MESSAGE, at_sender=True)
 
     ctx['reason'] = user_input
     await adopt_cmd.send(
@@ -799,7 +805,7 @@ async def handle_step_compliance(
         return
     if user_input == '退出':
         _apply_context.pop(user_id, None)
-        await adopt_cmd.finish("已结束领养云冰祈~", at_sender=True)
+        await adopt_cmd.finish(ADOPTION_ENDED_MESSAGE, at_sender=True)
 
     if user_input != '我承诺合规使用':
         await adopt_cmd.reject(
@@ -831,7 +837,7 @@ async def handle_step_tech_confirm(
         return
     if user_input == '退出':
         _apply_context.pop(user_id, None)
-        await adopt_cmd.finish("已结束领养云冰祈~", at_sender=True)
+        await adopt_cmd.finish(ADOPTION_ENDED_MESSAGE, at_sender=True)
 
     if user_input != '我已经搭建bot客户端':
         await adopt_cmd.reject(
@@ -870,7 +876,7 @@ async def handle_step_confirm(
         return
     if user_input == '退出':
         _apply_context.pop(user_id, None)
-        await adopt_cmd.finish("已结束领养云冰祈~", at_sender=True)
+        await adopt_cmd.finish(ADOPTION_ENDED_MESSAGE, at_sender=True)
 
     if user_input != '确认提交':
         await adopt_cmd.reject(

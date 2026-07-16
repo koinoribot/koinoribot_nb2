@@ -50,6 +50,34 @@ def get_what_image():
 # ===== 核心功能：请叫我 =====
 call_me_cmd = on_command("冰祈请叫我", aliases={"请叫我"}, priority=5, block=True)
 
+
+def _build_no_message(event: Event):
+    no_img_res = get_no_image()
+    if not no_img_res:
+        return None
+    try:
+        return build_image_msg(event, no_img_res.base64)
+    except Exception as exc:
+        logger.warning(f"构建图片失败: {exc}")
+        return None
+
+
+async def _finish_rejection(message: str, image_message=None) -> None:
+    if image_message:
+        await call_me_cmd.finish(
+            Message(message) + image_message,
+            at_sender=True,
+        )
+        return
+    await call_me_cmd.finish(message, at_sender=True)
+
+
+def _nickname_display_size(message: str) -> int:
+    text_length = len(message)
+    utf8_length = len(message.encode("utf-8"))
+    return int((utf8_length - text_length) / 2 + text_length)
+
+
 @call_me_cmd.handle()
 async def handle_call_me(bot: Bot, event: Event, uid: int = Depends(get_uid), args: Message = CommandArg()):
     message = args.extract_plain_text().strip()
@@ -57,42 +85,23 @@ async def handle_call_me(bot: Bot, event: Event, uid: int = Depends(get_uid), ar
     if not message:
         await call_me_cmd.finish("你要冰祈叫你什么呢？", at_sender=True)
     
-    # 获取图片
-    no_img_res = get_no_image()
-    no_msg = None
-    if no_img_res:
-        try:
-            no_msg = build_image_msg(event, no_img_res.base64)
-        except Exception as e:
-            logger.warning(f"构建图片失败: {e}")
+    no_msg = _build_no_message(event)
     
     # 特殊 UUID 拦截 (此处保留原版逻辑中的 80000000，虽然新版使用了唯一 UID)
     if uid == 80000000:
         if no_msg:
             await call_me_cmd.finish(no_msg)
-        else:
-            await call_me_cmd.finish("no")
+            return
+        await call_me_cmd.finish("no")
+        return
     
     # 长度和编码检查
-    len_txt = len(message)
-    len_txt_utf8 = len(message.encode('utf-8'))
-    size = int((len_txt_utf8 - len_txt) / 2 + len_txt)
-    
-    if size > 20:
-        error_msg = f"名字太长，冰祈记不住.."
-        if no_msg:
-            await call_me_cmd.finish(Message(error_msg) + no_msg, at_sender=True)
-        else:
-            await call_me_cmd.finish(error_msg, at_sender=True)
+    if _nickname_display_size(message) > 20:
+        return await _finish_rejection("名字太长，冰祈记不住..", no_msg)
         
     # 屏蔽词检查
-    for word in BANNED_WORD:
-        if word in message:
-            error_msg = f"不可以教坏冰祈.."
-            if no_msg:
-                await call_me_cmd.finish(Message(error_msg) + no_msg, at_sender=True)
-            else:
-                await call_me_cmd.finish(error_msg, at_sender=True)
+    if any(word in message for word in BANNED_WORD):
+        return await _finish_rejection("不可以教坏冰祈..", no_msg)
             
     # 更新数据库
     if set_user_nickname(uid, message):

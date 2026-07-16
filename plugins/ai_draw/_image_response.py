@@ -1,5 +1,4 @@
 import base64
-import binascii
 import json
 from dataclasses import dataclass
 from typing import Any
@@ -52,28 +51,25 @@ def extract_image_reference(
     if api_error:
         raise ImageResponseParseError(f"API returned error: {_error_message(api_error)}")
 
+    item = _first_image_item(data)
+    for field in _reference_field_order(preferred_format):
+        value = item.get(field)
+        if isinstance(value, str) and value:
+            return ImageReference(**{field: value})
+    raise ImageResponseParseError("missing JSON field: data[0].url or data[0].b64_json")
+
+
+def _first_image_item(data: dict[str, Any]) -> dict[str, Any]:
     items = data.get("data")
     if not isinstance(items, list) or not items or not isinstance(items[0], dict):
         raise ImageResponseParseError("missing JSON field: data[0]")
+    return items[0]
 
-    item = items[0]
-    b64_json = item.get("b64_json")
-    url = item.get("url")
-    has_b64_json = isinstance(b64_json, str) and b64_json
-    has_url = isinstance(url, str) and url
 
+def _reference_field_order(preferred_format: str | None) -> tuple[str, str]:
     if _normalize_response_format(preferred_format) == "b64_json":
-        if has_b64_json:
-            return ImageReference(b64_json=b64_json)
-        if has_url:
-            return ImageReference(url=url)
-    else:
-        if has_url:
-            return ImageReference(url=url)
-        if has_b64_json:
-            return ImageReference(b64_json=b64_json)
-
-    raise ImageResponseParseError("missing JSON field: data[0].url or data[0].b64_json")
+        return "b64_json", "url"
+    return "url", "b64_json"
 
 
 def decode_base64_image(value: str) -> bytes:
@@ -84,7 +80,7 @@ def decode_base64_image(value: str) -> bytes:
 
     try:
         return base64.b64decode("".join(value.split()), validate=True)
-    except (binascii.Error, ValueError) as exc:
+    except ValueError as exc:
         raise ImageResponseParseError("image base64 decode failed") from exc
 
 
